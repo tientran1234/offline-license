@@ -48,6 +48,42 @@ claims }` — because "expired" and "tampered" deserve different UI, and the
 claims are handed back on expiry so the screen can say *which* license.
 `verifyOrThrow()` exists for callers who prefer exceptions.
 
+## CLI
+
+The same three operations from a shell, on `node:util` `parseArgs` — still no
+dependencies.
+
+```bash
+offline-license keygen --out ./keys          # private.pem (0600) + public.pem
+
+offline-license issue --key ./keys/private.pem \
+  --id lic_7f3a --licensee "Acme Ltd" \
+  --feature export --feature sso \
+  --limit seats=25 --expires-in 365d         # prints the token
+
+offline-license verify --key ./keys/public.pem --token "$LICENSE"
+echo "$LICENSE" | offline-license verify --key ./keys/public.pem --json
+```
+
+Exit codes are the contract, because a release script branches on them:
+
+| Code | Meaning |
+|---|---|
+| 0 | Done, or the license is valid |
+| 1 | The license was rejected — the reason goes to stderr |
+| 2 | Bad usage: an unknown flag, a missing `--key`, `--expires-in 365` with no unit |
+
+A rejected license and a mistyped flag never share a code. `verify` reads the
+token from stdin when given no `--token`, so `issue | verify` needs no temp
+file, and `--json` prints the whole `VerifyResult` without changing the code.
+
+`--this-machine` binds to — or checks against — this box's
+`defaultFingerprint()`; `--machine <fingerprint>` issues for someone else's.
+Clock-rollback detection is deliberately absent: a high-water mark only means
+something across a process's lifetime, so it belongs to `MonotonicClock` inside
+a long-lived product, not to a command that exits.
+`offline-license <command> --help` lists the rest.
+
 ## Design decisions
 
 **The version prefix is inside the signature.** The signature covers the bytes
@@ -98,7 +134,8 @@ model needs more.
 
 ```bash
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
+npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 37 tests: round-trip, tampering, time, binding, clock, guard
+pnpm test                     # 60 tests: round-trip, tampering, time, binding, clock, guard, CLI
 pnpm build                    # ESM + .d.ts into dist/
 ```
