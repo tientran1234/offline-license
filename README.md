@@ -84,6 +84,40 @@ something across a process's lifetime, so it belongs to `MonotonicClock` inside
 a long-lived product, not to a command that exits.
 `offline-license <command> --help` lists the rest.
 
+## Key rotation
+
+Hand `verify` — or `LicenseGuard` — a ring of public keys instead of one, and
+let the `kid` claim say which key signed each license.
+
+```ts
+const publicKeys = { "2025": oldPublicKey, "2026": newPublicKey };
+
+const token = issue(newPrivateKey, { ...claims, kid: "2026" });
+verify(publicKeys, token);   // checked against "2026", and nothing else
+```
+
+Ship both keys for as long as licenses signed by the old one are still in the
+field, then drop that entry: every token naming it stops verifying, which is
+how a key is retired. A `kid` naming no key in the ring is `invalid_signature`
+— the ring never falls back to its other keys, because that would leave a
+retired key indistinguishable from a current one. A token issued before
+rotation carries no `kid` at all, so it is tried against every key in the ring;
+that is what makes the overlap period work.
+
+Choosing a key means reading the `kid` before the signature is checked, so the
+`kid` decides nothing else. The token still has to verify under the key it
+named, and the `kid` sits inside the signed payload, so editing it only breaks
+the signature it was meant to escape.
+
+From the shell, `--key` repeats as `<kid>=<file>`:
+
+```bash
+offline-license issue --key ./2026/private.pem --kid 2026 --id lic_7f3a --licensee "Acme Ltd"
+
+offline-license verify --token "$LICENSE" \
+  --key 2025=./2025/public.pem --key 2026=./2026/public.pem
+```
+
 ## Design decisions
 
 **The version prefix is inside the signature.** The signature covers the bytes
@@ -127,8 +161,6 @@ model needs more.
 - **Obfuscation.** The public key and this code are visible to whoever has the
   binary. This library makes forging a license impossible; it does not make
   removing the check impossible. Nothing does.
-- **Key rotation.** One public key per product build. Rotate by shipping a new
-  build that accepts both keys during the overlap.
 
 ## Install / develop
 
@@ -136,6 +168,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 60 tests: round-trip, tampering, time, binding, clock, guard, CLI
+pnpm test                     # 76 tests: round-trip, tampering, time, binding, clock, guard, rotation, CLI
 pnpm build                    # ESM + .d.ts into dist/
 ```
