@@ -30,6 +30,13 @@ describe("issue → verify", () => {
     expect(() => issue(keys.privateKey, claims({ expiresAt: NOW, notBefore: NOW + 1 }))).toThrow(ClaimsError);
   });
 
+  it("carries a kid through unchanged, and refuses one that is not a string", () => {
+    const token = issue(keys.privateKey, claims({ kid: "2026-q3" }));
+    expect(verify(keys.publicKey, token, { now: at(NOW) })).toEqual({ ok: true, claims: claims({ kid: "2026-q3" }) });
+    expect(() => issue(keys.privateKey, claims({ kid: "" }))).toThrow(ClaimsError);
+    expect(() => issue(keys.privateKey, claims({ kid: 7 as never }))).toThrow(ClaimsError);
+  });
+
   it("rejects a public key where a private one is expected", () => {
     expect(() => issue(keys.publicKey, claims())).toThrow(/private key/);
   });

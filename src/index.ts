@@ -1,5 +1,5 @@
 export { generateKeyPair, toPrivateKey, toPublicKey } from "./keys.js";
-export type { KeyInput, KeyPairPem } from "./keys.js";
+export type { KeyInput, KeyPairPem, KeyRing, PublicKeyInput } from "./keys.js";
 
 export { issue, TOKEN_PREFIX } from "./issue.js";
 export { verify, verifyOrThrow, LicenseError } from "./verify.js";

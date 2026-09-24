@@ -1,7 +1,23 @@
-import { createPrivateKey, createPublicKey, generateKeyPairSync, type KeyObject } from "node:crypto";
+import { createPrivateKey, createPublicKey, generateKeyPairSync, KeyObject } from "node:crypto";
 
 /** PEM string or an already-built KeyObject. */
 export type KeyInput = string | KeyObject;
+
+/**
+ * The public keys a product trusts, each under the `kid` its licenses carry.
+ *
+ * Ship the whole ring for as long as licenses signed by the old key are still
+ * in the field; drop that entry to retire the key, and every token naming it
+ * stops verifying.
+ */
+export type KeyRing = Readonly<Record<string, KeyInput>>;
+
+/** What a verifier accepts: one public key, or a ring to choose from by `kid`. */
+export type PublicKeyInput = KeyInput | KeyRing;
+
+export function isKeyRing(input: PublicKeyInput): input is KeyRing {
+  return typeof input !== "string" && !(input instanceof KeyObject);
+}
 
 export interface KeyPairPem {
   /** PKCS#8 PEM. Keep on the issuing server only. */

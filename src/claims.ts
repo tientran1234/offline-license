@@ -13,6 +13,8 @@ export interface LicenseClaims {
   notBefore?: number;
   /** Output of bindMachine(). Present only for machine-bound licenses. */
   machine?: string;
+  /** Names the signing key, so a verifier holding a KeyRing knows which to try. */
+  kid?: string;
   metadata?: Readonly<Record<string, string>>;
 }
 
@@ -31,6 +33,7 @@ export function assertClaims(value: unknown): asserts value is LicenseClaims {
   optionalNumber(c, "expiresAt");
   optionalNumber(c, "notBefore");
   optionalString(c, "machine");
+  optionalString(c, "kid");
 
   if (!Array.isArray(c.features) || !c.features.every((f) => typeof f === "string")) {
     throw new ClaimsError("features must be a string array");
