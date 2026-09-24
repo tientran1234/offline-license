@@ -1,8 +1,8 @@
-import { verify as cryptoVerify } from "node:crypto";
+import { verify as cryptoVerify, type KeyObject } from "node:crypto";
 import { assertClaims, ClaimsError, type LicenseClaims } from "./claims.js";
 import { fromBase64Url } from "./encoding.js";
 import { TOKEN_PREFIX } from "./issue.js";
-import { toPublicKey, type KeyInput } from "./keys.js";
+import { isKeyRing, toPublicKey, type PublicKeyInput } from "./keys.js";
 import { bindMachine } from "./machine.js";
 import type { MonotonicClock } from "./clock.js";
 
@@ -32,22 +32,20 @@ export interface VerifyOptions {
 
 /**
  * Check a token. Every check runs in order: signature before anything else, so
- * nothing below ever reasons about claims an attacker wrote.
+ * nothing below ever reasons about claims an attacker wrote. Choosing the key
+ * by `kid` is not one of the checks — see selectKeys.
  */
-export function verify(publicKey: KeyInput, token: string, options: VerifyOptions = {}): VerifyResult {
+export function verify(publicKey: PublicKeyInput, token: string, options: VerifyOptions = {}): VerifyResult {
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX) return { ok: false, reason: "malformed" };
   const [prefix, payload, signature] = parts as [string, string, string];
 
-  const key = toPublicKey(publicKey);
   const signedBytes = Buffer.from(`${prefix}.${payload}`);
-  let signatureOk = false;
-  try {
-    signatureOk = cryptoVerify(null, signedBytes, key, fromBase64Url(signature));
-  } catch {
-    signatureOk = false;
+  const signatureBytes = fromBase64Url(signature);
+  const candidates = selectKeys(publicKey, payload);
+  if (!candidates.some((key) => signatureOk(key, signedBytes, signatureBytes))) {
+    return { ok: false, reason: "invalid_signature" };
   }
-  if (!signatureOk) return { ok: false, reason: "invalid_signature" };
 
   let claims: LicenseClaims;
   try {
@@ -83,6 +81,53 @@ export function verify(publicKey: KeyInput, token: string, options: VerifyOption
   return { ok: true, claims };
 }
 
+/**
+ * The keys that may have signed this token.
+ *
+ * Choosing by `kid` means reading the payload before the signature is checked,
+ * which is why the kid is used for nothing else: it picks a key, and the token
+ * then has to survive that key like any other. Editing the kid changes the
+ * signed bytes, so a forged one fails the check it was meant to escape.
+ *
+ * A kid naming no key in the ring yields no candidate at all rather than
+ * falling back to the rest of it. Falling back would make a retired key
+ * indistinguishable from a current one, which is the entire point of the ring.
+ */
+function selectKeys(input: PublicKeyInput, payload: string): KeyObject[] {
+  if (!isKeyRing(input)) return [toPublicKey(input)];
+
+  const kid = peekKid(payload);
+  if (kid === undefined) {
+    // Issued before rotation, so it names no key. Every key in the ring is one
+    // the caller trusts, so try them all.
+    return Object.values(input).map(toPublicKey);
+  }
+  const named = input[kid];
+  return named === undefined ? [] : [toPublicKey(named)];
+}
+
+/**
+ * The kid from an unverified payload — for key selection and nothing else, so
+ * anything unreadable is simply "no kid" rather than an error of its own.
+ */
+function peekKid(payload: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(fromBase64Url(payload).toString("utf8"));
+    const kid = (parsed as Record<string, unknown>)?.kid;
+    return typeof kid === "string" && kid !== "" ? kid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function signatureOk(key: KeyObject, signed: Buffer, signature: Buffer): boolean {
+  try {
+    return cryptoVerify(null, signed, key, signature);
+  } catch {
+    return false;
+  }
+}
+
 export class LicenseError extends Error {
   override readonly name = "LicenseError";
   constructor(
@@ -94,7 +139,7 @@ export class LicenseError extends Error {
 }
 
 /** Same as verify(), for callers who prefer exceptions. */
-export function verifyOrThrow(publicKey: KeyInput, token: string, options?: VerifyOptions): LicenseClaims {
+export function verifyOrThrow(publicKey: PublicKeyInput, token: string, options?: VerifyOptions): LicenseClaims {
   const result = verify(publicKey, token, options);
   if (!result.ok) throw new LicenseError(result.reason, result.claims);
   return result.claims;

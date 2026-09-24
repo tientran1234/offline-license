@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import type { LicenseClaims } from "./claims.js";
 import { issue } from "./issue.js";
-import { generateKeyPair } from "./keys.js";
+import { generateKeyPair, type PublicKeyInput } from "./keys.js";
 import { bindMachine, defaultFingerprint } from "./machine.js";
 import { verify, type VerifyOptions } from "./verify.js";
 
@@ -55,6 +55,8 @@ Run \`offline-license <command> --help\` for one command's options.
   --expires-in <dur>  Duration from issuedAt: 365d, 24h, 30m, 900s.
   --expires-at <t>    Unix seconds or an ISO 8601 date. Excludes --expires-in.
   --not-before <t>    Unix seconds or an ISO 8601 date.
+  --kid <name>        Name the signing key, so a verifier holding several
+                      knows which one to check against.
   --machine <fp>      Bind to the machine with this fingerprint.
   --this-machine      Bind to this machine's defaultFingerprint().
   --now <t>           Override issuedAt. For reproducible tokens.
@@ -64,6 +66,9 @@ Run \`offline-license <command> --help\` for one command's options.
 
   --key <file>        SPKI PEM of the public key. Reads the token from stdin
                       when neither --token nor --token-file is given.
+  --key <kid>=<file>  Repeatable. Trust several keys during a rotation and let
+                      the token's kid choose between them. Given more than one,
+                      every key must be named; a kid naming none is rejected.
   --machine <fp>      Fingerprint to check a machine-bound license against.
   --this-machine      Use this machine's defaultFingerprint().
   --skew <seconds>    Slack on notBefore and expiresAt. Default: 60.
@@ -152,6 +157,7 @@ async function issueCommand(argv: readonly string[], io: CliIo): Promise<number>
       "expires-in": { type: "string" },
       "expires-at": { type: "string" },
       "not-before": { type: "string" },
+      kid: { type: "string" },
       machine: { type: "string" },
       "this-machine": { type: "boolean" },
       now: { type: "string" },
@@ -190,6 +196,8 @@ async function issueCommand(argv: readonly string[], io: CliIo): Promise<number>
     claims.notBefore = asTime(values["not-before"], "--not-before");
   }
 
+  if (values.kid !== undefined) claims.kid = values.kid;
+
   const fingerprint = machineFingerprint(values.machine, values["this-machine"]);
   if (fingerprint !== undefined) claims.machine = bindMachine(id, fingerprint);
 
@@ -212,7 +220,7 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
   const { values } = parseArgs({
     args: [...argv],
     options: {
-      key: { type: "string" },
+      key: { type: "string", multiple: true },
       token: { type: "string" },
       "token-file": { type: "string" },
       machine: { type: "string" },
@@ -228,7 +236,7 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
     return OK;
   }
 
-  const publicKey = await readText(required(values.key, "--key"), "--key");
+  const publicKey = await readKeys(values.key);
   const token = (await readToken(values.token, values["token-file"], io)).trim();
 
   const options: VerifyOptions = {};
@@ -264,6 +272,27 @@ const describe = (claims: LicenseClaims) => `${claims.licensee} (${claims.id})`;
 
 const expiry = (claims: LicenseClaims) =>
   claims.expiresAt === undefined ? "" : `, expires ${new Date(claims.expiresAt * 1000).toISOString()}`;
+
+/**
+ * One --key is the whole key, exactly as before. Several make a ring, and then
+ * each needs the name a token's kid selects it by — an unnamed key in a ring
+ * could never be chosen.
+ */
+async function readKeys(entries: readonly string[] | undefined): Promise<PublicKeyInput> {
+  const list = entries ?? [];
+  const only = list.length === 1 ? list[0] : undefined;
+  if (list.length === 0 || (only !== undefined && only.indexOf("=") <= 0)) {
+    return readText(required(only, "--key"), "--key");
+  }
+
+  const ring: Record<string, string> = {};
+  for (const entry of list) {
+    const eq = entry.indexOf("=");
+    if (eq <= 0) throw new UsageError(`--key expects <kid>=<file> when several keys are given, got ${entry}`);
+    ring[entry.slice(0, eq)] = await readText(entry.slice(eq + 1), "--key");
+  }
+  return ring;
+}
 
 async function readToken(token: string | undefined, file: string | undefined, io: CliIo): Promise<string> {
   if (token !== undefined && file !== undefined) {

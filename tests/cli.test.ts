@@ -135,6 +135,28 @@ describe("verify", () => {
     expect(JSON.parse(stdout)).toEqual({ ok: false, reason: "malformed" });
   });
 
+  it("picks a key out of several by the token's kid, and drops one to retire it", async () => {
+    // A rotation, from the shell: issue under each key, trust both, then trust
+    // only the new one and watch the old license stop verifying.
+    const second = await mkdtemp(join(tmpdir(), "offline-license-cli-"));
+    expect((await cli(["keygen", "--out", second])).code).toBe(0);
+    const ring = [`--key`, `old=${keys.public}`, `--key`, `new=${join(second, "public.pem")}`];
+
+    const oldToken = await issued("--kid", "old");
+    const underNewKey = await cli([
+      "issue", "--key", join(second, "private.pem"), "--id", "lic_cli", "--licensee", "Acme Ltd", "--kid", "new",
+    ]);
+    expect(underNewKey.code).toBe(0);
+    const newToken = underNewKey.stdout.trim();
+
+    expect((await cli(["verify", ...ring, "--token", oldToken])).code).toBe(0);
+    expect((await cli(["verify", ...ring, "--token", newToken])).code).toBe(0);
+
+    const retired = await cli(["verify", "--key", `new=${join(second, "public.pem")}`, "--token", oldToken]);
+    expect(retired.code).toBe(1);
+    expect(retired.stderr).toContain("invalid_signature");
+  });
+
   it("checks a machine binding, and refuses the same token without one", async () => {
     const token = await issued("--this-machine");
 
@@ -162,6 +184,7 @@ describe("usage errors exit 2, never 1", () => {
     ["both expiry flags", () => [...issueArgs(), "--expires-in", "1d", "--expires-at", "1800000000"], "mutually exclusive"],
     ["contradictory machine flags", () => [...issueArgs(), "--machine", "fp", "--this-machine"], "mutually exclusive"],
     ["two ways to supply a token", () => ["verify", "--key", keys.public, "--token", "t", "--token-file", "f"], "mutually exclusive"],
+    ["an unnamed key among several", () => ["verify", "--key", keys.public, "--key", `new=${keys.public}`, "--token", "t"], "<kid>=<file>"],
   ])("%s", async (_name, args, fragment) => {
     const { code, stderr } = await cli(args());
     expect(code).toBe(2);
