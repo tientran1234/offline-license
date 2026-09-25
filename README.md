@@ -118,6 +118,47 @@ offline-license verify --token "$LICENSE" \
   --key 2025=./2025/public.pem --key 2026=./2026/public.pem
 ```
 
+## License files
+
+A token is a base64 blob. The envelope is what ships to the customer: the token
+plus the context whoever opens the file needs.
+
+```ts
+import { writeLicenseFile, readLicenseFile } from "offline-license";
+
+await writeLicenseFile("/etc/acme/license.json", {
+  token,
+  issuer: "Acme Ltd",
+  notes: "renewal 2027 — support@acme.example",
+});
+
+const file = await readLicenseFile("/etc/acme/license.json");
+verify(publicKey, file.token);
+```
+
+```json
+{
+  "version": 1,
+  "token": "lic1.eyJmZWF0dXJlcyI6…",
+  "issuer": "Acme Ltd",
+  "notes": "renewal 2027 — support@acme.example"
+}
+```
+
+`issuer` and `notes` sit outside the signature, so anyone holding the file can
+rewrite them. They are labels for people; every decision still comes from the
+claims inside the token. `readLicenseFile` does no verifying — it has no key,
+and "no license installed" is a different screen from "this license expired".
+A missing file therefore surfaces as an ordinary `ENOENT`, while a file that is
+there and unusable is a `LicenseFileError`.
+
+`version` is refused rather than interpreted when it is not the one this
+release knows, and within a version the shape is closed: an unknown field is a
+typo — `note` for `notes` — and reading past it would erase it on the next
+write. Writes replace the file atomically, like the clock store's, because a
+truncated envelope parses as nothing and would lock out a customer whose
+license was fine.
+
 ## Design decisions
 
 **The version prefix is inside the signature.** The signature covers the bytes
@@ -168,6 +209,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 76 tests: round-trip, tampering, time, binding, clock, guard, rotation, CLI
+pnpm test                     # 92 tests: round-trip, tampering, time, binding, clock, guard, rotation, CLI, license files
 pnpm build                    # ESM + .d.ts into dist/
 ```
