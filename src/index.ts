@@ -10,6 +10,9 @@ export type { LicenseClaims } from "./claims.js";
 
 export { bindMachine, defaultFingerprint } from "./machine.js";
 
+export { readLicenseFile, writeLicenseFile, LicenseFileError, LICENSE_FILE_VERSION } from "./file.js";
+export type { LicenseFile, LicenseFileInput } from "./file.js";
+
 export { MonotonicClock } from "./clock.js";
 export type { ClockObservation, MonotonicClockOptions } from "./clock.js";
 export { FileStore, MemoryStore } from "./stores.js";
