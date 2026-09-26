@@ -76,6 +76,57 @@ describe("time", () => {
   });
 });
 
+describe("grace period", () => {
+  const expiresAt = NOW;
+  const WEEK = 7 * 86_400;
+  const graceToken = (over = {}) => issue(keys.privateKey, claims({ expiresAt, ...over }));
+  const graced = (now: number, graceSeconds = WEEK) =>
+    verify(keys.publicKey, graceToken(), { now: at(now), skewSeconds: 0, graceSeconds });
+
+  it("keeps a just-expired license valid, and marks it so the UI can warn", () => {
+    expect(graced(expiresAt + 86_400)).toEqual({
+      ok: true,
+      claims: claims({ expiresAt }),
+      status: "expired_in_grace",
+    });
+  });
+
+  it("marks nothing while the license is simply valid", () => {
+    expect(graced(expiresAt - 1)).toEqual({ ok: true, claims: claims({ expiresAt }) });
+  });
+
+  it("expires for real once the window closes — grace that never ends is no expiry", () => {
+    expect(graced(expiresAt + WEEK)).toMatchObject({ ok: false, reason: "expired" });
+    expect(graced(expiresAt + WEEK).claims?.id).toBe("lic_test_1");
+  });
+
+  it("is off unless asked for", () => {
+    expect(graced(expiresAt + 1, 0)).toMatchObject({ ok: false, reason: "expired" });
+    expect(verify(keys.publicKey, graceToken(), { now: at(expiresAt + 1), skewSeconds: 0 })).toMatchObject({
+      ok: false,
+      reason: "expired",
+    });
+  });
+
+  it("measures from expiresAt, with the skew still on top of it", () => {
+    const t = graceToken();
+    const inGrace = verify(keys.publicKey, t, { now: at(expiresAt + 3600 + 30), skewSeconds: 60, graceSeconds: 3600 });
+    expect(inGrace).toMatchObject({ ok: true, status: "expired_in_grace" });
+    const past = verify(keys.publicKey, t, { now: at(expiresAt + 3600 + 61), skewSeconds: 60, graceSeconds: 3600 });
+    expect(past).toMatchObject({ ok: false, reason: "expired" });
+  });
+
+  it("does not paper over a different failure inside the window", () => {
+    const t = graceToken({ machine: bindMachine("lic_test_1", "fp-of-this-box") });
+    const result = verify(keys.publicKey, t, {
+      now: at(expiresAt + 86_400),
+      graceSeconds: WEEK,
+      machineFingerprint: "fp-of-another-box",
+    });
+    expect(result).toMatchObject({ ok: false, reason: "machine_mismatch" });
+  });
+});
+
 describe("machine binding", () => {
   const fingerprint = "fp-of-this-box";
   const bound = () => issue(keys.privateKey, claims({ machine: bindMachine("lic_test_1", fingerprint) }));

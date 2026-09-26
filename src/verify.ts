@@ -16,7 +16,8 @@ export type VerifyFailure =
   | "clock_rollback";
 
 export type VerifyResult =
-  | { ok: true; claims: LicenseClaims }
+  /** `status` is present only when the license is inside its grace window. */
+  | { ok: true; claims: LicenseClaims; status?: "expired_in_grace" }
   | { ok: false; reason: VerifyFailure; claims?: LicenseClaims };
 
 export interface VerifyOptions {
@@ -28,6 +29,11 @@ export interface VerifyOptions {
   clock?: MonotonicClock;
   /** Slack for expiry and notBefore, in seconds. Default: 60. */
   skewSeconds?: number;
+  /**
+   * Seconds past expiresAt during which the license still verifies, reported as
+   * status "expired_in_grace". Default: 0 — expiry blocks the moment it lands.
+   */
+  graceSeconds?: number;
 }
 
 /**
