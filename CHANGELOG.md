@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-26
+
+- Configurable grace period after `expiresAt` (`{ graceSeconds }`) returning `expired_in_grace`, so a product can warn about a late renewal instead of blocking a paying customer the moment the license lapses.
+
 ## 2026-09-25
 
 - License file envelope: JSON `{ version, token, issuer, notes }` with `readLicenseFile` / `writeLicenseFile`, so a license ships as a file a person can read and a later format can be refused instead of misread.

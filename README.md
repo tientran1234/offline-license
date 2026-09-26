@@ -40,13 +40,48 @@ license.assertFeature("billing");   // throws LicenseError { reason: "invalid_cl
 | Ed25519 signature over `lic1.<payload>` | `invalid_signature` | Nothing below reads a byte an attacker could have written |
 | Claims schema | `invalid_claims` | A valid signature over the wrong shape is still not a license |
 | Clock has not gone backwards | `clock_rollback` | An expired license becomes "valid" if the clock is set back — check before expiry |
-| `notBefore` / `expiresAt` (± skew) | `not_yet_valid` / `expired` | |
+| `notBefore` / `expiresAt` (± skew) | `not_yet_valid` / `expired` | A grace period, when set, only moves where `expired` begins |
 | Machine binding | `machine_mismatch` | |
 
 `verify()` returns a discriminated union rather than throwing — `{ ok, reason,
 claims }` — because "expired" and "tampered" deserve different UI, and the
 claims are handed back on expiry so the screen can say *which* license.
 `verifyOrThrow()` exists for callers who prefer exceptions.
+
+## Grace period
+
+`expiresAt` is a cliff, and renewals do not land punctually. `graceSeconds`
+keeps a just-expired license working for a configured window and says so, so
+the screen can warn instead of the product stopping mid-shift.
+
+```ts
+const result = verify(publicKey, token, { graceSeconds: 7 * 86_400 });
+
+result.ok;      // true — everything the license allows still works
+result.status;  // "expired_in_grace" — and the UI has something to warn with
+
+new LicenseGuard({ publicKey, token, graceSeconds: 7 * 86_400 }).inGrace();
+```
+
+The result is `ok` because anything else would block, which is the whole thing
+grace exists to avoid: `hasFeature` and `withinLimit` keep answering and
+`status` is all that changes. It is absent while the license is simply valid,
+and the window defaults to none, so a caller that never asks for grace sees
+what it saw before.
+
+The window ends. Past `expiresAt + graceSeconds` the reason is `expired`, as it
+always was — grace with no end is no expiry at all. Only expiry is softened: a
+machine mismatch or a rolled-back clock inside the window fails exactly as it
+does outside, because being late is not a reason to accept a license that was
+never valid here.
+
+From the shell it is `--grace <seconds>`. The exit code stays 0 — the product
+should run — and the status leads the line the way a rejection's reason does:
+
+```bash
+offline-license verify --key ./public.pem --token "$LICENSE" --grace 604800
+# expired_in_grace: Acme Ltd (lic_7f3a), expires 2026-09-01T00:00:00.000Z
+```
 
 ## CLI
 
@@ -209,6 +244,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 92 tests: round-trip, tampering, time, binding, clock, guard, rotation, CLI, license files
+pnpm test                     # 100 tests: round-trip, tampering, time, grace, binding, clock, guard, rotation, CLI, license files
 pnpm build                    # ESM + .d.ts into dist/
 ```
