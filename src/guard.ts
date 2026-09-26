@@ -28,6 +28,12 @@ export class LicenseGuard {
     return result.ok ? result.claims : null;
   }
 
+  /** True when the license is past expiresAt and alive only on grace — warn, do not block. */
+  inGrace(): boolean {
+    const result = this.check();
+    return result.ok && result.status === "expired_in_grace";
+  }
+
   hasFeature(feature: string): boolean {
     return this.claims()?.features.includes(feature) ?? false;
   }

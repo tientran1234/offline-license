@@ -129,6 +129,19 @@ describe("verify", () => {
     expect(expired.stderr).toContain("lic_cli");
   });
 
+  it("exits 0 inside --grace and names the status, then 1 once the window closes", async () => {
+    const token = await issued("--expires-at", "2030-01-01T00:00:00Z");
+    const dayLate = ["verify", "--key", keys.public, "--token", token, "--now", "2030-01-02T00:00:00Z"];
+
+    const grace = await cli([...dayLate, "--grace", String(7 * 86_400)]);
+    expect(grace.code).toBe(0);
+    expect(grace.stdout).toContain("expired_in_grace: Acme Ltd (lic_cli)");
+
+    const past = await cli([...dayLate, "--grace", "3600"]);
+    expect(past.code).toBe(1);
+    expect(past.stderr).toContain("expired");
+  });
+
   it("still exits 1 under --json — the machine-readable form reports the same verdict", async () => {
     const { code, stdout } = await cli(["verify", "--key", keys.public, "--token", "not-a-token", "--json"]);
     expect(code).toBe(1);

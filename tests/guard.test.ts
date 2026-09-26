@@ -38,6 +38,19 @@ describe("LicenseGuard", () => {
     expect(g.withinLimit("projects", 1_000_000)).toBe(true);
   });
 
+  it("keeps answering inside a grace window, and admits it is on grace", () => {
+    const g = new LicenseGuard({
+      publicKey: keys.publicKey,
+      token: issue(keys.privateKey, claims()),
+      now: at(NOW + 31 * 86_400), // a day past expiresAt
+      graceSeconds: 7 * 86_400,
+    });
+    expect(g.inGrace()).toBe(true);
+    expect(g.hasFeature("sso")).toBe(true); // warn, do not block
+    expect(g.withinLimit("seats", 9)).toBe(true);
+    expect(guard().inGrace()).toBe(false);
+  });
+
   it("throws LicenseError instances, not plain errors", () => {
     try {
       guard({}, NOW + 40 * 86_400).assertFeature("sso");

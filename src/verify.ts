@@ -74,8 +74,15 @@ export function verify(publicKey: PublicKeyInput, token: string, options: Verify
   if (claims.notBefore !== undefined && now + skew < claims.notBefore) {
     return { ok: false, reason: "not_yet_valid", claims };
   }
+  let status: "expired_in_grace" | undefined;
   if (claims.expiresAt !== undefined && now - skew >= claims.expiresAt) {
-    return { ok: false, reason: "expired", claims };
+    // Grace keeps a just-expired license working so the product can warn about a
+    // late renewal instead of locking a paying customer out on the day. The
+    // window still ends: grace with no end is no expiry at all.
+    if (now - skew >= claims.expiresAt + (options.graceSeconds ?? 0)) {
+      return { ok: false, reason: "expired", claims };
+    }
+    status = "expired_in_grace";
   }
   if (claims.machine !== undefined) {
     const fingerprint = options.machineFingerprint;
@@ -84,7 +91,7 @@ export function verify(publicKey: PublicKeyInput, token: string, options: Verify
     }
   }
 
-  return { ok: true, claims };
+  return status === undefined ? { ok: true, claims } : { ok: true, claims, status };
 }
 
 /**

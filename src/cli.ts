@@ -72,6 +72,9 @@ Run \`offline-license <command> --help\` for one command's options.
   --machine <fp>      Fingerprint to check a machine-bound license against.
   --this-machine      Use this machine's defaultFingerprint().
   --skew <seconds>    Slack on notBefore and expiresAt. Default: 60.
+  --grace <seconds>   Keep accepting the license this long past expiresAt,
+                      printing expired_in_grace and still exiting 0, so a
+                      product can warn about a late renewal. Default: 0.
   --now <t>           Unix seconds or an ISO 8601 date. Overrides the clock.
   --json              Print the whole VerifyResult. The exit code is unchanged.
 
@@ -226,6 +229,7 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
       machine: { type: "string" },
       "this-machine": { type: "boolean" },
       skew: { type: "string" },
+      grace: { type: "string" },
       now: { type: "string" },
       json: { type: "boolean" },
       help: { type: "boolean", short: "h" },
@@ -245,6 +249,7 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
     options.now = () => now;
   }
   if (values.skew !== undefined) options.skewSeconds = asNumber(values.skew, "--skew");
+  if (values.grace !== undefined) options.graceSeconds = asNumber(values.grace, "--grace");
   const fingerprint = machineFingerprint(values.machine, values["this-machine"]);
   if (fingerprint !== undefined) options.machineFingerprint = fingerprint;
 
@@ -258,7 +263,9 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
   if (values.json) {
     io.out(`${JSON.stringify(result, null, 2)}\n`);
   } else if (result.ok) {
-    io.out(`valid: ${describe(result.claims)}${expiry(result.claims)}\n`);
+    // The status leads the line the way the reason does below, so one grep over
+    // either stream tells a script which of the three verdicts it got.
+    io.out(`${result.status ?? "valid"}: ${describe(result.claims)}${expiry(result.claims)}\n`);
   } else {
     // The library hands claims back on expiry so a UI can say *which* license;
     // the CLI passes that through for the same reason.
