@@ -1,6 +1,7 @@
 import type { LicenseClaims } from "./claims.js";
 import type { PublicKeyInput } from "./keys.js";
-import { LicenseError, verify, type VerifyOptions, type VerifyResult } from "./verify.js";
+import { LicenseError, type VerifyOptions, type VerifyResult } from "./core.js";
+import { verify } from "./verify.js";
 
 export interface LicenseGuardOptions extends VerifyOptions {
   publicKey: PublicKeyInput;

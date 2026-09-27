@@ -1,40 +1,9 @@
 import { verify as cryptoVerify, type KeyObject } from "node:crypto";
 import { assertClaims, ClaimsError, type LicenseClaims } from "./claims.js";
+import { checkTime, LicenseError, TOKEN_PREFIX, type VerifyOptions, type VerifyResult } from "./core.js";
 import { fromBase64Url } from "./encoding.js";
-import { TOKEN_PREFIX } from "./issue.js";
 import { isKeyRing, toPublicKey, type PublicKeyInput } from "./keys.js";
 import { bindMachine } from "./machine.js";
-import type { MonotonicClock } from "./clock.js";
-
-export type VerifyFailure =
-  | "malformed"
-  | "invalid_signature"
-  | "invalid_claims"
-  | "not_yet_valid"
-  | "expired"
-  | "machine_mismatch"
-  | "clock_rollback";
-
-export type VerifyResult =
-  /** `status` is present only when the license is inside its grace window. */
-  | { ok: true; claims: LicenseClaims; status?: "expired_in_grace" }
-  | { ok: false; reason: VerifyFailure; claims?: LicenseClaims };
-
-export interface VerifyOptions {
-  /** Unix seconds. Injected for tests; defaults to the wall clock. */
-  now?: () => number;
-  /** Required when the license carries a machine binding. */
-  machineFingerprint?: string;
-  /** When given, a rolled-back clock fails verification. */
-  clock?: MonotonicClock;
-  /** Slack for expiry and notBefore, in seconds. Default: 60. */
-  skewSeconds?: number;
-  /**
-   * Seconds past expiresAt during which the license still verifies, reported as
-   * status "expired_in_grace". Default: 0 — expiry blocks the moment it lands.
-   */
-  graceSeconds?: number;
-}
 
 /**
  * Check a token. Every check runs in order: signature before anything else, so
@@ -65,25 +34,14 @@ export function verify(publicKey: PublicKeyInput, token: string, options: Verify
     throw err;
   }
 
-  const now = options.now?.() ?? Math.floor(Date.now() / 1000);
-  const skew = options.skewSeconds ?? 60;
+  const timing = checkTime(claims, {
+    now: options.now?.() ?? Math.floor(Date.now() / 1000),
+    clock: options.clock,
+    skewSeconds: options.skewSeconds,
+    graceSeconds: options.graceSeconds,
+  });
+  if (!timing.ok) return { ok: false, reason: timing.reason, claims };
 
-  if (options.clock && options.clock.observe(now).rollback) {
-    return { ok: false, reason: "clock_rollback", claims };
-  }
-  if (claims.notBefore !== undefined && now + skew < claims.notBefore) {
-    return { ok: false, reason: "not_yet_valid", claims };
-  }
-  let status: "expired_in_grace" | undefined;
-  if (claims.expiresAt !== undefined && now - skew >= claims.expiresAt) {
-    // Grace keeps a just-expired license working so the product can warn about a
-    // late renewal instead of locking a paying customer out on the day. The
-    // window still ends: grace with no end is no expiry at all.
-    if (now - skew >= claims.expiresAt + (options.graceSeconds ?? 0)) {
-      return { ok: false, reason: "expired", claims };
-    }
-    status = "expired_in_grace";
-  }
   if (claims.machine !== undefined) {
     const fingerprint = options.machineFingerprint;
     if (!fingerprint || bindMachine(claims.id, fingerprint) !== claims.machine) {
@@ -91,7 +49,7 @@ export function verify(publicKey: PublicKeyInput, token: string, options: Verify
     }
   }
 
-  return status === undefined ? { ok: true, claims } : { ok: true, claims, status };
+  return timing.status === undefined ? { ok: true, claims } : { ok: true, claims, status: timing.status };
 }
 
 /**
@@ -138,16 +96,6 @@ function signatureOk(key: KeyObject, signed: Buffer, signature: Buffer): boolean
     return cryptoVerify(null, signed, key, signature);
   } catch {
     return false;
-  }
-}
-
-export class LicenseError extends Error {
-  override readonly name = "LicenseError";
-  constructor(
-    readonly reason: VerifyFailure,
-    readonly claims?: LicenseClaims,
-  ) {
-    super(`license check failed: ${reason}`);
   }
 }
 

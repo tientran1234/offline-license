@@ -1,10 +1,8 @@
 import { sign } from "node:crypto";
 import { assertClaims, type LicenseClaims } from "./claims.js";
+import { TOKEN_PREFIX } from "./core.js";
 import { canonicalJson, toBase64Url } from "./encoding.js";
 import { toPrivateKey, type KeyInput } from "./keys.js";
-
-/** Token version prefix. Part of the signed bytes, so it cannot be swapped. */
-export const TOKEN_PREFIX = "lic1";
 
 /**
  * Sign claims into a token: `lic1.<payload>.<signature>`.

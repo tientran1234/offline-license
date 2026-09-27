@@ -1,9 +1,10 @@
 export { generateKeyPair, toPrivateKey, toPublicKey } from "./keys.js";
 export type { KeyInput, KeyPairPem, KeyRing, PublicKeyInput } from "./keys.js";
 
-export { issue, TOKEN_PREFIX } from "./issue.js";
-export { verify, verifyOrThrow, LicenseError } from "./verify.js";
-export type { VerifyFailure, VerifyOptions, VerifyResult } from "./verify.js";
+export { issue } from "./issue.js";
+export { verify, verifyOrThrow } from "./verify.js";
+export { LicenseError, TOKEN_PREFIX } from "./core.js";
+export type { VerifyFailure, VerifyOptions, VerifyResult } from "./core.js";
 
 export { assertClaims, ClaimsError } from "./claims.js";
 export type { LicenseClaims } from "./claims.js";

@@ -3,10 +3,11 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import type { LicenseClaims } from "./claims.js";
+import type { VerifyOptions } from "./core.js";
 import { issue } from "./issue.js";
 import { generateKeyPair, type PublicKeyInput } from "./keys.js";
 import { bindMachine, defaultFingerprint } from "./machine.js";
-import { verify, type VerifyOptions } from "./verify.js";
+import { verify } from "./verify.js";
 
 /**
  * Exit codes are this CLI's real contract: a release script runs `verify` and
