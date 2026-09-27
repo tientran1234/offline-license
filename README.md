@@ -194,6 +194,45 @@ write. Writes replace the file atomically, like the clock store's, because a
 truncated envelope parses as nothing and would lock out a customer whose
 license was fine.
 
+## Browser build
+
+`offline-license/web` is the same verifier over WebCrypto, for Electron
+renderers and dashboards that never see a Node API. The bundle imports nothing
+from `node:` — a test walks the import graph to keep it that way.
+
+```ts
+import { LicenseGuard, verify } from "offline-license/web";
+
+const result = await verify(publicKeyPem, token);   // the same VerifyResult
+const license = new LicenseGuard({ publicKey: publicKeyPem, token });
+
+await license.hasFeature("sso");
+```
+
+Everything returns a promise, because `subtle.verify` does and there is no
+synchronous way to reach it. That is the whole of the difference: the same
+checks in the same order, the same reasons, the same `LicenseError`, key rings
+and `kid` selection included. Both builds run one table of tokens and expected
+verdicts (`tests/vectors.ts`), so a verdict that moves on one platform and not
+the other fails the suite rather than a customer's screen.
+
+`verify` takes an SPKI PEM or a `CryptoKey` you imported yourself with
+`importPublicKey`. There is no cache behind the PEM — the guard re-verifies on
+every question, and hidden state is worse than a parse — so hand it the
+`CryptoKey` when a render loop makes the parse worth skipping.
+
+`bindMachine` is async here and byte-identical to the Node one, so a license
+issued against a fingerprint the server computed checks out in the renderer.
+There is no `defaultFingerprint()`: a browser has nothing stable to offer that
+is not either useless (a user agent string) or a tracking id, and a fingerprint
+that moves when someone changes a font setting locks out a paying customer. In
+Electron, pass the one the main process already has.
+
+WebCrypto needs a secure context, so a page served over `http://` has no
+`crypto.subtle` and the build says so rather than failing with an undefined
+property. Clock rollback works — `MonotonicClock` is exported and platform-free
+— but it needs a store, and the browser one is not built yet.
+
 ## Design decisions
 
 **The version prefix is inside the signature.** The signature covers the bytes
@@ -244,6 +283,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 100 tests: round-trip, tampering, time, grace, binding, clock, guard, rotation, CLI, license files
+pnpm test                     # 146 tests: round-trip, tampering, time, grace, binding, clock, guard, rotation, CLI, license files, the web build
 pnpm build                    # ESM + .d.ts into dist/
 ```

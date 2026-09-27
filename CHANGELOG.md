@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-27
+
+- Browser build on WebCrypto Ed25519 (`offline-license/web`) for Electron renderers and dashboards, running the same test vectors as Node, so a license can be checked where no Node API is in reach without a second implementation drifting from the first.
+
 ## 2026-09-26
 
 - Configurable grace period after `expiresAt` (`{ graceSeconds }`) returning `expired_in_grace`, so a product can warn about a late renewal instead of blocking a paying customer the moment the license lapses.
