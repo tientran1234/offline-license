@@ -28,6 +28,8 @@ export type { LicenseClaims } from "./claims.js";
 export { MonotonicClock } from "./clock.js";
 export type { ClockObservation, MonotonicClockOptions } from "./clock.js";
 export type { ClockStore } from "./stores.js";
+export { CLOCK_STORAGE_KEY, LocalStorageStore } from "./localstorage.js";
+export type { LocalStorageStoreOptions, WebStorage } from "./localstorage.js";
 
 /**
  * An SPKI PEM, or a CryptoKey already imported by the caller.
