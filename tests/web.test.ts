@@ -3,10 +3,13 @@ import { readFile } from "node:fs/promises";
 import { bindMachine, issue, LicenseError, MonotonicClock, verify as nodeVerify } from "../src/index.js";
 import {
   bindMachine as webBindMachine,
+  CLOCK_STORAGE_KEY,
   importPublicKey,
   LicenseGuard,
+  LocalStorageStore,
   verify,
   verifyOrThrow,
+  type WebStorage,
 } from "../src/web.js";
 import { at, claims, keys, NOW } from "./helpers.js";
 import { FINGERPRINT, vectors } from "./vectors.js";
@@ -35,7 +38,7 @@ describe("the browser build stands alone", () => {
     // `import { x } from "node:crypto"` three modules down breaks that, and a
     // browser only finds out at runtime — so walk the graph here instead.
     const reached = await runtimeImports("web.ts");
-    expect([...reached].sort()).toEqual(["claims.ts", "clock.ts", "core.ts", "web.ts"]);
+    expect([...reached].sort()).toEqual(["claims.ts", "clock.ts", "core.ts", "localstorage.ts", "web.ts"]);
     for (const file of reached) {
       const source = await readFile(new URL(`../src/${file}`, import.meta.url), "utf8");
       expect(source, `${file} imports a Node builtin`).not.toMatch(/from "node:/);
@@ -121,6 +124,109 @@ describe("the browser guard", () => {
   });
 });
 
+describe("LocalStorageStore", () => {
+  it("reads null when nothing was written yet", async () => {
+    expect(await new LocalStorageStore({ storage: new FakeStorage() }).read()).toBeNull();
+  });
+
+  it("round-trips a value under the key it documents", async () => {
+    const storage = new FakeStorage();
+    await new LocalStorageStore({ storage }).write(NOW);
+    expect(storage.items.get(CLOCK_STORAGE_KEY)).toBe(String(NOW));
+    expect(await new LocalStorageStore({ storage }).read()).toBe(NOW);
+  });
+
+  it("keeps two guards on one origin apart by key", async () => {
+    const storage = new FakeStorage();
+    await new LocalStorageStore({ storage, key: "other" }).write(NOW);
+    expect(await new LocalStorageStore({ storage }).read()).toBeNull();
+    expect(await new LocalStorageStore({ storage, key: "other" }).read()).toBe(NOW);
+  });
+
+  it("treats a cleared or corrupted entry as absent rather than as time zero", async () => {
+    const storage = new FakeStorage();
+    const store = new LocalStorageStore({ storage });
+    for (const junk of ["", "   ", "not a number", "NaN", "Infinity"]) {
+      storage.items.set(CLOCK_STORAGE_KEY, junk);
+      // Zero would be a mark every later clock beats, so it must not be one.
+      expect(await store.read(), `read ${JSON.stringify(junk)}`).toBeNull();
+    }
+  });
+
+  it("never lowers the stored mark, so a stale tab cannot undo a rollback", async () => {
+    const storage = new FakeStorage();
+    const store = new LocalStorageStore({ storage });
+    await store.write(NOW + 1000);
+    await store.write(NOW); // a second tab, flushing the mark it loaded yesterday
+    expect(await store.read()).toBe(NOW + 1000);
+  });
+
+  it("reaches for globalThis.localStorage when given no storage", async () => {
+    const storage = new FakeStorage();
+    await withAmbientStorage(storage, async () => {
+      await new LocalStorageStore().write(NOW);
+    });
+    expect(storage.items.get(CLOCK_STORAGE_KEY)).toBe(String(NOW));
+  });
+
+  it("names the missing API instead of failing on a property of undefined", async () => {
+    // Constructing has to be safe: a guard built while a page renders on a
+    // server is only unusable once something asks it for the mark.
+    const store = new LocalStorageStore();
+    await withAmbientStorage(undefined, async () => {
+      await expect(store.read()).rejects.toThrow(/localStorage is unavailable/);
+    });
+  });
+
+  it("carries the high-water mark across page loads, rollback and all", async () => {
+    const storage = new FakeStorage();
+    let t = NOW;
+    const clock = () => new MonotonicClock({ store: new LocalStorageStore({ storage }), now: () => t });
+
+    const first = clock();
+    await first.load(); // first run: the mark starts at now and is persisted at once
+    t = NOW + 10_000;
+    first.observe();
+    await first.flush();
+
+    t = NOW; // the page is reloaded with the clock wound back
+    const reloaded = clock();
+    await reloaded.load();
+    expect(reloaded.mark).toBe(NOW + 10_000);
+    expect(reloaded.observe().rollback).toBe(true);
+
+    const token = issue(keys.privateKey, claims());
+    expect(await verify(keys.publicKey, token, { now: at(NOW), clock: reloaded })).toEqual({
+      ok: false,
+      reason: "clock_rollback",
+      claims: claims(),
+    });
+  });
+});
+
+/** The two methods the store uses, over a Map: localStorage without a browser. */
+class FakeStorage implements WebStorage {
+  readonly items = new Map<string, string>();
+  getItem(key: string): string | null {
+    return this.items.get(key) ?? null;
+  }
+  setItem(key: string, value: string): void {
+    this.items.set(key, value);
+  }
+}
+
+/** Swap globalThis.localStorage for the duration of one check, then put it back. */
+async function withAmbientStorage(storage: WebStorage | undefined, fn: () => Promise<void>): Promise<void> {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true, writable: true });
+  try {
+    await fn();
+  } finally {
+    if (original) Object.defineProperty(globalThis, "localStorage", original);
+    else delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+}
+
 /** The modules a bundler would actually pull in: type-only edges are erased. */
 async function runtimeImports(entry: string, seen = new Set<string>()): Promise<Set<string>> {
   if (seen.has(entry)) return seen;
@@ -133,7 +239,7 @@ async function runtimeImports(entry: string, seen = new Set<string>()): Promise<
   return seen;
 }
 
-/** The web build exports no store yet — a localStorage one is the next item. */
+/** A store with nothing behind it, for the checks that are not about storage. */
 class MemoryClockStore {
   private value: number | null = null;
   async read() {
