@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-28
+
+- `MonotonicClock` store for browsers (`localStorage`) mirroring `FileStore` semantics, so a dashboard or an Electron renderer can keep its high-water mark across page loads and catch a wound-back clock instead of having the check available but unusable.
+
 ## 2026-09-27
 
 - Browser build on WebCrypto Ed25519 (`offline-license/web`) for Electron renderers and dashboards, running the same test vectors as Node, so a license can be checked where no Node API is in reach without a second implementation drifting from the first.

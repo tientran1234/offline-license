@@ -7,4 +7,4 @@ One item per pull request, in order.
 - [x] License file envelope: JSON `{ version, token, issuer, notes }` with `readLicenseFile` / `writeLicenseFile`.
 - [x] Configurable grace period after `expiresAt` (`{ graceSeconds }`) returning `expired_in_grace` so the UI can warn instead of block.
 - [x] Browser build on WebCrypto Ed25519 (`offline-license/web`) for Electron renderers and dashboards; same test vectors as Node.
-- [ ] `MonotonicClock` store for browsers (`localStorage`) mirroring `FileStore` semantics.
+- [x] `MonotonicClock` store for browsers (`localStorage`) mirroring `FileStore` semantics.

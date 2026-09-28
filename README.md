@@ -230,8 +230,36 @@ Electron, pass the one the main process already has.
 
 WebCrypto needs a secure context, so a page served over `http://` has no
 `crypto.subtle` and the build says so rather than failing with an undefined
-property. Clock rollback works — `MonotonicClock` is exported and platform-free
-— but it needs a store, and the browser one is not built yet.
+property.
+
+Clock rollback is checked here too. `MonotonicClock` is platform-free already;
+what it lacked was somewhere to keep its high-water mark between page loads, and
+`LocalStorageStore` is that — one number under `offline-license:clock`, or under
+a `key` of your own.
+
+```ts
+import { LocalStorageStore, MonotonicClock, verify } from "offline-license/web";
+
+const clock = new MonotonicClock({ store: new LocalStorageStore() });
+await clock.load();                            // once, at startup
+
+await verify(publicKeyPem, token, { clock });  // clock_rollback when it applies
+```
+
+It reads the way `FileStore` does: a missing entry, an empty one, or one that is
+not a number all mean "first run" rather than time zero — zero is a mark every
+later clock beats, so it would switch the check off without saying so. Nothing
+mimics the atomic rename, because `setItem` either replaces a value or leaves it
+as it was; there is no torn write to read back.
+
+Two things differ, both because an origin is not a file. A write never lowers
+what is stored: every tab holds its own in-memory mark, and one left open since
+yesterday would otherwise flush that older mark over a newer one and hand back
+the rollback the mark exists to catch. And a browser that refuses to store —
+site data blocked, or Safari's private mode — throws rather than quietly doing
+nothing, because a product that believes the check is on when it is not is worse
+off than one that is told. Pass `storage` (`sessionStorage`, or your own object)
+when `localStorage` is not where the mark belongs.
 
 ## Design decisions
 
@@ -283,6 +311,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 146 tests: round-trip, tampering, time, grace, binding, clock, guard, rotation, CLI, license files, the web build
+pnpm test                     # 154 tests: round-trip, tampering, time, grace, binding, clock, guard, rotation, CLI, license files, the web build
 pnpm build                    # ESM + .d.ts into dist/
 ```
