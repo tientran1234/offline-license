@@ -30,6 +30,24 @@ describe("LicenseGuard", () => {
     expect(guard().assertFeature("sso").licensee).toBe("Acme Ltd");
   });
 
+  it("reads a valued feature, and separates a withheld one from an absent one", () => {
+    const g = guard({ features: { sso: true, seats: 25, tier: "pro", beta: false } });
+    expect(g.value("seats")).toBe(25);
+    expect(g.value("tier")).toBe("pro");
+    expect(g.value("sso")).toBe(true);
+    expect(g.value("beta")).toBe(false); // withheld
+    expect(g.value("billing")).toBeNull(); // never mentioned
+    expect(g.hasFeature("sso")).toBe(true);
+    expect(g.hasFeature("beta")).toBe(false);
+    expect(() => g.assertFeature("beta")).toThrow(expect.objectContaining({ reason: "invalid_claims" }));
+  });
+
+  it("values an array feature at true, and says nothing about a license it rejects", () => {
+    expect(guard().value("sso")).toBe(true);
+    expect(guard().value("billing")).toBeNull();
+    expect(guard({}, NOW + 40 * 86_400).value("sso")).toBeNull();
+  });
+
   it("enforces numeric limits, and treats an unset limit as unlimited", () => {
     const g = guard({ limits: { seats: 10 } });
     expect(g.limit("seats")).toBe(10);

@@ -2,7 +2,7 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import type { LicenseClaims } from "./claims.js";
+import type { FeatureValue, Features, LicenseClaims } from "./claims.js";
 import type { VerifyOptions } from "./core.js";
 import { issue } from "./issue.js";
 import { generateKeyPair, type PublicKeyInput } from "./keys.js";
@@ -50,7 +50,9 @@ Run \`offline-license <command> --help\` for one command's options.
   --key <file>        PKCS#8 PEM of the issuing private key.
   --id <id>           Unique license id. Also keys the machine binding.
   --licensee <name>   Who it is issued to.
-  --feature <name>    Repeatable.
+  --feature <name>    Repeatable. Written <name>=<value> it gives the feature a
+                      value — a number, true/false, or a string — instead of
+                      only naming it; one of those makes every --feature valued.
   --limit <key=n>     Repeatable numeric cap, e.g. --limit seats=25.
   --meta <key=value>  Repeatable string metadata.
   --expires-in <dur>  Duration from issuedAt: 365d, 24h, 30m, 900s.
@@ -179,7 +181,7 @@ async function issueCommand(argv: readonly string[], io: CliIo): Promise<number>
   const claims: LicenseClaims = {
     id,
     licensee: required(values.licensee, "--licensee"),
-    features: values.feature ?? [],
+    features: features(values.feature),
     issuedAt,
   };
 
@@ -329,6 +331,37 @@ async function readText(path: string, flag: string): Promise<string> {
   } catch (err) {
     throw new UsageError(`${flag}: ${(err as Error).message}`);
   }
+}
+
+/**
+ * `--feature export` keeps the array form, so a command line that worked before
+ * this flag learned values still produces the same token byte for byte. One
+ * `--feature seats=25` turns the claim into a record, where a bare name is
+ * `true`: a license states its features in one form or the other, not both.
+ */
+function features(entries: readonly string[] | undefined): Features {
+  const list = entries ?? [];
+  if (!list.some((entry) => entry.includes("="))) return list;
+
+  const record: Record<string, FeatureValue> = {};
+  for (const entry of list) {
+    const eq = entry.indexOf("=");
+    if (eq < 0) record[entry] = true;
+    else if (eq === 0) throw new UsageError(`--feature expects <name> or <name>=<value>, got ${entry}`);
+    else record[entry.slice(0, eq)] = asFeatureValue(entry.slice(eq + 1));
+  }
+  return record;
+}
+
+/**
+ * A shell has only strings. `true`, `false` and a number read as themselves,
+ * because that is what an operator typing them means; anything else stays a
+ * string, so a tier called `2xl` is not mangled on its way into the token.
+ */
+function asFeatureValue(text: string): FeatureValue {
+  if (text === "true") return true;
+  if (text === "false") return false;
+  return /^-?\d+(\.\d+)?$/.test(text) ? Number(text) : text;
 }
 
 function pairs<T>(

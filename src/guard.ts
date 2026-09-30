@@ -1,4 +1,4 @@
-import { hasFeature, type LicenseClaims } from "./claims.js";
+import { featureValue, hasFeature, type FeatureValue, type LicenseClaims } from "./claims.js";
 import type { PublicKeyInput } from "./keys.js";
 import { LicenseError, type VerifyOptions, type VerifyResult } from "./core.js";
 import { verify } from "./verify.js";
@@ -48,6 +48,20 @@ export class LicenseGuard {
       throw new LicenseError("invalid_claims", result.claims);
     }
     return result.claims;
+  }
+
+  /**
+   * What the license attaches to a feature — a tier name, a count, a switch —
+   * or null when it names none (or the license is invalid).
+   *
+   * The union is not narrowed by a type parameter: the claims come off a token,
+   * so a caller-supplied shape would be an assertion about the wire that nothing
+   * verifies. Narrow it where you read it, next to the check that it is the kind
+   * you expected.
+   */
+  value(feature: string): FeatureValue | null {
+    const claims = this.claims();
+    return claims === null ? null : featureValue(claims.features, feature);
   }
 
   /** The cap for `key`, or null when the license sets none (or is invalid). */

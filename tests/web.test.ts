@@ -122,6 +122,16 @@ describe("the browser guard", () => {
   it("separates an invalid license from a missing feature", async () => {
     await expect(guard().assertFeature("billing")).rejects.toMatchObject({ reason: "invalid_claims" });
   });
+
+  it("reads a valued feature the way the Node guard does", async () => {
+    const valued = guard({ features: { sso: true, seats: 25, tier: "pro", beta: false } });
+    expect(await valued.value("seats")).toBe(25);
+    expect(await valued.value("tier")).toBe("pro");
+    expect(await valued.value("beta")).toBe(false);
+    expect(await valued.value("billing")).toBeNull();
+    expect(await valued.hasFeature("beta")).toBe(false);
+    expect(await guard().value("sso")).toBe(true); // the array form, valued at true
+  });
 });
 
 describe("LocalStorageStore", () => {

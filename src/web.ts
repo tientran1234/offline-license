@@ -1,4 +1,11 @@
-import { assertClaims, ClaimsError, hasFeature, type LicenseClaims } from "./claims.js";
+import {
+  assertClaims,
+  ClaimsError,
+  featureValue,
+  hasFeature,
+  type FeatureValue,
+  type LicenseClaims,
+} from "./claims.js";
 import {
   checkTime,
   LicenseError,
@@ -200,6 +207,16 @@ export class LicenseGuard {
       throw new LicenseError("invalid_claims", result.claims);
     }
     return result.claims;
+  }
+
+  /**
+   * What the license attaches to a feature — a tier name, a count, a switch —
+   * or null when it names none (or the license is invalid). Not narrowed by a
+   * type parameter, for the reason the Node guard gives.
+   */
+  async value(feature: string): Promise<FeatureValue | null> {
+    const claims = await this.claims();
+    return claims === null ? null : featureValue(claims.features, feature);
   }
 
   /** The cap for `key`, or null when the license sets none (or is invalid). */

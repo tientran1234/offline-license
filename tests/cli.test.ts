@@ -88,6 +88,27 @@ describe("issue", () => {
     });
   });
 
+  it("gives features values when one is asked for, and keeps the array form otherwise", async () => {
+    const flags = ["sso", "seats=25", "tier=pro", "beta=false"].flatMap((f) => ["--feature", f]);
+    const valued = await issued(...flags);
+    expect(verify(await readFile(keys.public, "utf8"), valued)).toMatchObject({
+      ok: true,
+      claims: { features: { sso: true, seats: 25, tier: "pro", beta: false } },
+    });
+
+    const named = await issued("--feature", "sso");
+    expect(verify(await readFile(keys.public, "utf8"), named)).toMatchObject({
+      ok: true,
+      claims: { features: ["sso"] },
+    });
+  });
+
+  it("refuses a --feature with a value and no name", async () => {
+    const { code, stderr } = await cli([...issueArgs(), "--feature", "=25"]);
+    expect(code).toBe(2);
+    expect(stderr).toContain("--feature expects <name> or <name>=<value>");
+  });
+
   it("turns --expires-in into an absolute expiry, and omits one when asked for neither", async () => {
     const dated = verify(await readFile(keys.public, "utf8"), await issued("--now", "1800000000", "--expires-in", "30d"));
     expect(dated.claims?.expiresAt).toBe(1_800_000_000 + 30 * 86_400);
