@@ -48,6 +48,64 @@ claims }` — because "expired" and "tampered" deserve different UI, and the
 claims are handed back on expiry so the screen can say *which* license.
 `verifyOrThrow()` exists for callers who prefer exceptions.
 
+## Valued features
+
+Some entitlements have a value and not only a presence: the plan tier a screen
+has to name, a count that belongs to one feature. `features` takes a record for
+those, alongside the array it always took.
+
+```ts
+const token = issue(privateKey, {
+  ...claims,
+  features: { sso: true, seats: 25, tier: "pro", beta: false },
+});
+
+const license = new LicenseGuard({ publicKey, token });
+
+license.value("seats");        // 25
+license.value("tier");         // "pro"
+license.value("billing");      // null — the license never mentions it
+license.hasFeature("sso");     // true
+license.hasFeature("beta");    // false
+```
+
+`["export", "sso"]` means exactly `{ export: true, sso: true }`, so the two
+forms answer the same question and `hasFeature` is unchanged by which one a
+license carries. That is also why every token already in the field keeps
+verifying: nothing about the array form moved, and an issuer that never writes a
+record never sees a difference.
+
+Only an explicit `false` withholds a feature. An issuer shipping one record
+shape to every customer needs a way to say no, and reading a present `false` as
+allowed would invert what the license says. A `0` or an empty string is a value
+to read, not a switch — `hasFeature("seats")` is true when the license names
+`seats` at all, and what zero seats means belongs to the product.
+
+`value()` returns `boolean | number | string | null`, and deliberately takes no
+type parameter for the caller's feature shape. The claims come off a token, so a
+supplied shape would be an assertion about the wire that nothing verifies.
+Narrow the union where you read it, next to the check that it is the kind you
+expected.
+
+Caps stay in `limits`. A numeric feature is a value the product reads; `limits`
+is what `withinLimit` compares usage against, and keeping the two apart is what
+lets `withinLimit("seats", used)` mean one thing.
+
+`featureValue` and `hasFeature` are exported for code holding claims from
+`verify()` rather than a guard, and both builds go through them, so a verdict
+cannot differ between Node and the browser.
+
+From the shell, a `=` gives the value:
+
+```bash
+offline-license issue --key ./private.pem --id lic_7f3a --licensee "Acme Ltd" \
+  --feature sso --feature seats=25 --feature tier=pro
+```
+
+`true`, `false` and a number read as themselves; anything else stays a string,
+so a tier called `2xl` survives the trip. With no `=` in any `--feature` the
+claim is the array it was before, byte for byte.
+
 ## Grace period
 
 `expiresAt` is a cliff, and renewals do not land punctually. `graceSeconds`
@@ -311,6 +369,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 154 tests: round-trip, tampering, time, grace, binding, clock, guard, rotation, CLI, license files, the web build
+pnpm test                     # 167 tests: round-trip, tampering, time, grace, binding, clock, guard, features, rotation, CLI, license files, the web build
 pnpm build                    # ESM + .d.ts into dist/
 ```

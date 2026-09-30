@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-30
+
+- Valued features: `features` may be a record (`{ sso: true, seats: 25, tier: "pro" }`) alongside the array form, with `guard.value("seats")` typed and old tokens verifying unchanged, so an entitlement that carries a tier or a count no longer has to hide in `metadata`, which nothing checks.
+
 ## 2026-09-28
 
 - `MonotonicClock` store for browsers (`localStorage`) mirroring `FileStore` semantics, so a dashboard or an Electron renderer can keep its high-water mark across page loads and catch a wound-back clock instead of having the check available but unusable.
