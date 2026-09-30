@@ -1,4 +1,4 @@
-import type { LicenseClaims } from "./claims.js";
+import { hasFeature, type LicenseClaims } from "./claims.js";
 import type { PublicKeyInput } from "./keys.js";
 import { LicenseError, type VerifyOptions, type VerifyResult } from "./core.js";
 import { verify } from "./verify.js";
@@ -36,14 +36,15 @@ export class LicenseGuard {
   }
 
   hasFeature(feature: string): boolean {
-    return this.claims()?.features.includes(feature) ?? false;
+    const claims = this.claims();
+    return claims === null ? false : hasFeature(claims.features, feature);
   }
 
   /** Throws LicenseError with the precise reason: invalid license vs. missing feature. */
   assertFeature(feature: string): LicenseClaims {
     const result = this.check();
     if (!result.ok) throw new LicenseError(result.reason, result.claims);
-    if (!result.claims.features.includes(feature)) {
+    if (!hasFeature(result.claims.features, feature)) {
       throw new LicenseError("invalid_claims", result.claims);
     }
     return result.claims;

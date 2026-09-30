@@ -29,6 +29,7 @@ const expiring = claims({ expiresAt: NOW - DAY });
 const bound = claims({ machine: bindMachine(claims().id, FINGERPRINT) });
 const future = claims({ notBefore: NOW + DAY, expiresAt: NOW + 30 * DAY });
 const rotated = claims({ kid: "2026" });
+const valued = claims({ features: { sso: true, seats: 25, tier: "pro", beta: false } });
 
 /** Signed by the real key, but the payload is not a license. */
 function signedNonsense(): string {
@@ -147,6 +148,13 @@ export const vectors: readonly Vector[] = [
     token: issue(keys.privateKey, bound),
     options: { now: at(NOW) },
     expected: { ok: false, reason: "machine_mismatch", claims: bound },
+  },
+  {
+    name: "features as a record of values rather than a list of names",
+    publicKey: keys.publicKey,
+    token: issue(keys.privateKey, valued),
+    options: { now: at(NOW) },
+    expected: { ok: true, claims: valued },
   },
   {
     name: "a ring, and a kid naming the key that signed",

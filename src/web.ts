@@ -1,4 +1,4 @@
-import { assertClaims, ClaimsError, type LicenseClaims } from "./claims.js";
+import { assertClaims, ClaimsError, hasFeature, type LicenseClaims } from "./claims.js";
 import {
   checkTime,
   LicenseError,
@@ -23,8 +23,8 @@ import {
 
 export { LicenseError, TOKEN_PREFIX } from "./core.js";
 export type { VerifyFailure, VerifyOptions, VerifyResult } from "./core.js";
-export { assertClaims, ClaimsError } from "./claims.js";
-export type { LicenseClaims } from "./claims.js";
+export { assertClaims, ClaimsError, featureValue, hasFeature } from "./claims.js";
+export type { FeatureValue, Features, LicenseClaims } from "./claims.js";
 export { MonotonicClock } from "./clock.js";
 export type { ClockObservation, MonotonicClockOptions } from "./clock.js";
 export type { ClockStore } from "./stores.js";
@@ -188,14 +188,15 @@ export class LicenseGuard {
   }
 
   async hasFeature(feature: string): Promise<boolean> {
-    return (await this.claims())?.features.includes(feature) ?? false;
+    const claims = await this.claims();
+    return claims === null ? false : hasFeature(claims.features, feature);
   }
 
   /** Throws LicenseError with the precise reason: invalid license vs. missing feature. */
   async assertFeature(feature: string): Promise<LicenseClaims> {
     const result = await this.check();
     if (!result.ok) throw new LicenseError(result.reason, result.claims);
-    if (!result.claims.features.includes(feature)) {
+    if (!hasFeature(result.claims.features, feature)) {
       throw new LicenseError("invalid_claims", result.claims);
     }
     return result.claims;

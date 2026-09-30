@@ -6,8 +6,8 @@ export { verify, verifyOrThrow } from "./verify.js";
 export { LicenseError, TOKEN_PREFIX } from "./core.js";
 export type { VerifyFailure, VerifyOptions, VerifyResult } from "./core.js";
 
-export { assertClaims, ClaimsError } from "./claims.js";
-export type { LicenseClaims } from "./claims.js";
+export { assertClaims, ClaimsError, featureValue, hasFeature } from "./claims.js";
+export type { FeatureValue, Features, LicenseClaims } from "./claims.js";
 
 export { bindMachine, defaultFingerprint } from "./machine.js";
 
