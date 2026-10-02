@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-02
+
+- Metered limits: a tamper-evident `UsageLedger` (file and localStorage) that counts consumption against `limits` and refuses past the cap, with entries HMAC-chained with the license id so editing the file is detectable, so a product metering exports or seats no longer has to keep its own tally in a number anyone can lower.
+
 ## 2026-09-30
 
 - Valued features: `features` may be a record (`{ sso: true, seats: 25, tier: "pro" }`) alongside the array form, with `guard.value("seats")` typed and old tokens verifying unchanged, so an entitlement that carries a tier or a count no longer has to hide in `metadata`, which nothing checks.

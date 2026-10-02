@@ -106,6 +106,81 @@ offline-license issue --key ./private.pem --id lic_7f3a --licensee "Acme Ltd" \
 so a tier called `2xl` survives the trip. With no `=` in any `--feature` the
 claim is the array it was before, byte for byte.
 
+## Metered limits
+
+`limits` states a cap; `UsageLedger` is what counts against it. Consumption is
+recorded locally, in an append-only ledger whose entries are HMAC-chained with
+the license id, so the count cannot be edited down with a text editor.
+
+```ts
+import { UsageLedger, FileLedgerStore, verifyOrThrow } from "offline-license";
+
+const claims = verifyOrThrow(publicKey, token);     // the caps come from the license
+const usage = new UsageLedger({ store: new FileLedgerStore("/var/lib/acme/usage.json"), claims });
+
+await usage.load();                  // once, at startup — reads and checks every link
+
+usage.used("exports");               // 7
+usage.remaining("exports");          // 3
+usage.withinLimit("exports", 2);     // true
+
+await usage.record("exports");       // appended and persisted
+await usage.record("exports", 5);    // throws UsageLimitError { key, cap, used, requested }
+```
+
+Reads are synchronous off the loaded ledger, because "how many left" belongs on
+a render path; `load()` has to resolve first, the way the clock's does. Writing
+is not, and `record()` re-reads the store before it appends: two windows of the
+same app share one file, and appending to a copy loaded minutes ago would drop
+whatever the other one recorded since. That is also what makes the cap honest
+across windows — the check is against what is stored, not against what this
+process loaded.
+
+The arithmetic is `withinLimit`'s, so the guard and the ledger cannot disagree:
+consumption may reach a cap and not pass it, a key the license caps nowhere
+allows everything, and `remaining` is `null` rather than `0` for such a key —
+uncapped is not "nothing left".
+
+```json
+{
+  "version": 1,
+  "license": "lic_7f3a",
+  "entries": [
+    {"key":"exports","amount":1,"at":1800000000,"mac":"kPx…"},
+    {"key":"exports","amount":2,"at":1800003600,"mac":"7Qa…"}
+  ]
+}
+```
+
+Each `mac` is `HMAC-SHA256(previous mac ‖ this entry, key = licenseId)` — the
+same primitive and the same key as machine binding, under a `usage.` tag so one
+can never be read where the other is expected. Because every link covers the one
+before it, an amount that was edited, an entry dropped from the middle, two
+reordered, or a `mac` copied from elsewhere in the file all break the chain:
+`load()` then throws `UsageLedgerError` with `reason: "broken_chain"` instead of
+handing back a total it cannot stand behind. A ledger relabelled to another
+license fails too — the id is the key, not just a field — and `reason` is
+`"wrong_license"` when the label disagrees, `"malformed"` when the file is
+truncated or from a later format, because those three deserve different screens.
+
+**What the chain does not catch is deletion.** Dropping the last few entries, or
+the file, leaves a ledger that chains perfectly — it just says less was used.
+Nothing stored next to the counter can fix that, which is why a missing ledger is
+a first run rather than an error, exactly as a missing clock mark is. `head` is
+the hook if you need more: the last mac, one short string standing for the whole
+history, which a product that syncs with a server or reads an MDM profile can pin
+somewhere the customer does not own and compare on startup.
+
+The browser build has the same ledger over `LocalStorageLedgerStore`, and the
+macs are byte-identical, so an Electron app can write it in the main process and
+read it in the renderer.
+
+```ts
+import { UsageLedger, LocalStorageLedgerStore } from "offline-license/web";
+
+const usage = new UsageLedger({ store: new LocalStorageLedgerStore(), claims });
+```
+
 ## Grace period
 
 `expiresAt` is a cliff, and renewals do not land punctually. `graceSeconds`
@@ -369,6 +444,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 167 tests: round-trip, tampering, time, grace, binding, clock, guard, features, rotation, CLI, license files, the web build
+pnpm test                     # 195 tests: round-trip, tampering, time, grace, binding, clock, guard, features, metered limits, rotation, CLI, license files, the web build
 pnpm build                    # ESM + .d.ts into dist/
 ```
