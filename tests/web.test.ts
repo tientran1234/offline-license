@@ -1,12 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
-import { bindMachine, issue, LicenseError, MonotonicClock, verify as nodeVerify } from "../src/index.js";
+import {
+  bindMachine,
+  issue,
+  LicenseError,
+  MemoryLedgerStore,
+  MonotonicClock,
+  UsageLedger as NodeUsageLedger,
+  verify as nodeVerify,
+} from "../src/index.js";
 import {
   bindMachine as webBindMachine,
   CLOCK_STORAGE_KEY,
   importPublicKey,
   LicenseGuard,
+  LocalStorageLedgerStore,
   LocalStorageStore,
+  UsageLedger,
+  USAGE_STORAGE_KEY,
   verify,
   verifyOrThrow,
   type WebStorage,
@@ -38,7 +49,14 @@ describe("the browser build stands alone", () => {
     // `import { x } from "node:crypto"` three modules down breaks that, and a
     // browser only finds out at runtime — so walk the graph here instead.
     const reached = await runtimeImports("web.ts");
-    expect([...reached].sort()).toEqual(["claims.ts", "clock.ts", "core.ts", "localstorage.ts", "web.ts"]);
+    expect([...reached].sort()).toEqual([
+      "claims.ts",
+      "clock.ts",
+      "core.ts",
+      "ledger.ts",
+      "localstorage.ts",
+      "web.ts",
+    ]);
     for (const file of reached) {
       const source = await readFile(new URL(`../src/${file}`, import.meta.url), "utf8");
       expect(source, `${file} imports a Node builtin`).not.toMatch(/from "node:/);
@@ -210,6 +228,62 @@ describe("LocalStorageStore", () => {
       ok: false,
       reason: "clock_rollback",
       claims: claims(),
+    });
+  });
+});
+
+describe("the browser usage ledger", () => {
+  const usage = (store: LocalStorageLedgerStore | MemoryLedgerStore) =>
+    new UsageLedger({ store, claims: claims({ limits: { exports: 5 } }), now: at(NOW) });
+
+  it("counts against limits and refuses the consumption past the cap", async () => {
+    const ledger = usage(new LocalStorageLedgerStore({ storage: new FakeStorage() }));
+    await ledger.record("exports", 4);
+    expect(ledger.used("exports")).toBe(4);
+    expect(ledger.remaining("exports")).toBe(1);
+    await expect(ledger.record("exports", 2)).rejects.toMatchObject({ key: "exports", cap: 5, used: 4 });
+  });
+
+  it("keeps the ledger under the key it documents, and reads it back after a reload", async () => {
+    const storage = new FakeStorage();
+    await usage(new LocalStorageLedgerStore({ storage })).record("exports", 3);
+    expect(storage.items.get(USAGE_STORAGE_KEY)).toContain('"amount":3');
+
+    const reloaded = usage(new LocalStorageLedgerStore({ storage }));
+    await reloaded.load();
+    expect(reloaded.used("exports")).toBe(3);
+  });
+
+  it("refuses an entry edited in devtools", async () => {
+    const storage = new FakeStorage();
+    await usage(new LocalStorageLedgerStore({ storage })).record("exports", 4);
+    storage.items.set(USAGE_STORAGE_KEY, storage.items.get(USAGE_STORAGE_KEY)!.replace('"amount":4', '"amount":1'));
+
+    await expect(usage(new LocalStorageLedgerStore({ storage })).load()).rejects.toMatchObject({
+      reason: "broken_chain",
+    });
+  });
+
+  it("chains byte-for-byte the way the Node build does, so one ledger serves both", async () => {
+    // An Electron app writes from the main process and reads in the renderer.
+    // A mac that differed between the builds would read as tampering there.
+    const store = new MemoryLedgerStore();
+    const node = new NodeUsageLedger({ store, claims: claims({ limits: { exports: 5 } }), now: at(NOW) });
+    await node.record("exports", 2);
+
+    const web = usage(store);
+    await web.load();
+    expect(web.head).toBe(node.head);
+    await web.record("exports", 1);
+    await node.load();
+    expect(node.used("exports")).toBe(3);
+    expect(node.head).toBe(web.head);
+  });
+
+  it("names the missing API instead of failing on a property of undefined", async () => {
+    const ledger = usage(new LocalStorageLedgerStore());
+    await withAmbientStorage(undefined, async () => {
+      await expect(ledger.load()).rejects.toThrow(/localStorage is unavailable/);
     });
   });
 });

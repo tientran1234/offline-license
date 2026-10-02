@@ -13,6 +13,7 @@ import {
   type VerifyOptions,
   type VerifyResult,
 } from "./core.js";
+import { ChainedLedger, type ChainedLedgerOptions } from "./ledger.js";
 
 /**
  * The same verifier, on WebCrypto instead of node:crypto — for Electron
@@ -35,8 +36,14 @@ export type { FeatureValue, Features, LicenseClaims } from "./claims.js";
 export { MonotonicClock } from "./clock.js";
 export type { ClockObservation, MonotonicClockOptions } from "./clock.js";
 export type { ClockStore } from "./stores.js";
-export { CLOCK_STORAGE_KEY, LocalStorageStore } from "./localstorage.js";
-export type { LocalStorageStoreOptions, WebStorage } from "./localstorage.js";
+export { CLOCK_STORAGE_KEY, LocalStorageStore, LocalStorageLedgerStore, USAGE_STORAGE_KEY } from "./localstorage.js";
+export type {
+  LocalStorageLedgerStoreOptions,
+  LocalStorageStoreOptions,
+  WebStorage,
+} from "./localstorage.js";
+export { parseLedger, serializeLedger, UsageLedgerError, UsageLimitError, USAGE_LEDGER_VERSION } from "./ledger.js";
+export type { Ledger, LedgerStore, UsageEntry } from "./ledger.js";
 
 /**
  * An SPKI PEM, or a CryptoKey already imported by the caller.
@@ -228,6 +235,24 @@ export class LicenseGuard {
   async withinLimit(key: string, used: number): Promise<boolean> {
     const cap = await this.limit(key);
     return cap === null ? (await this.claims()) !== null : used < cap;
+  }
+}
+
+export type UsageLedgerOptions = Omit<ChainedLedgerOptions, "mac">;
+
+/**
+ * The browser twin of the Node usage ledger, over `LocalStorageLedgerStore` or
+ * anything else that keeps a string.
+ *
+ * It was async in both builds already: a ledger has to be persisted before the
+ * consumption it records is counted, and storage is awaited wherever it lives.
+ * The chain's HMAC is this build's `bindMachine`, which produces the same bytes
+ * the Node one does, so a ledger an Electron main process wrote verifies in the
+ * renderer and the other way round.
+ */
+export class UsageLedger extends ChainedLedger {
+  constructor(options: UsageLedgerOptions) {
+    super({ ...options, mac: bindMachine });
   }
 }
 
