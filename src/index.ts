@@ -19,5 +19,11 @@ export type { ClockObservation, MonotonicClockOptions } from "./clock.js";
 export { FileStore, MemoryStore } from "./stores.js";
 export type { ClockStore } from "./stores.js";
 
+export { UsageLedger } from "./usage.js";
+export type { UsageLedgerOptions } from "./usage.js";
+export { parseLedger, serializeLedger, UsageLedgerError, UsageLimitError, USAGE_LEDGER_VERSION } from "./ledger.js";
+export type { Ledger, LedgerStore, UsageEntry } from "./ledger.js";
+export { FileLedgerStore, MemoryLedgerStore } from "./stores.js";
+
 export { LicenseGuard } from "./guard.js";
 export type { LicenseGuardOptions } from "./guard.js";
