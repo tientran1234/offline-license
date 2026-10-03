@@ -11,6 +11,15 @@ export type { FeatureValue, Features, LicenseClaims } from "./claims.js";
 
 export { bindMachine, defaultFingerprint } from "./machine.js";
 
+export {
+  ACTIVATION_PREFIX,
+  ActivationError,
+  assertMachineClaim,
+  createActivationRequest,
+  readActivationRequest,
+} from "./activation.js";
+export type { ActivationRequestInput, MachineClaim } from "./activation.js";
+
 export { readLicenseFile, writeLicenseFile, LicenseFileError, LICENSE_FILE_VERSION } from "./file.js";
 export type { LicenseFile, LicenseFileInput } from "./file.js";
 

@@ -28,6 +28,8 @@ export interface LicenseClaims {
   machine?: string;
   /** Names the signing key, so a verifier holding a KeyRing knows which to try. */
   kid?: string;
+  /** The nonce of the activation request this license answers. Set by fulfilActivation(). */
+  activation?: string;
   metadata?: Readonly<Record<string, string>>;
 }
 
@@ -47,6 +49,7 @@ export function assertClaims(value: unknown): asserts value is LicenseClaims {
   optionalNumber(c, "notBefore");
   optionalString(c, "machine");
   optionalString(c, "kid");
+  optionalString(c, "activation");
 
   if (!isFeatures(c.features)) {
     throw new ClaimsError("features must be a string array, or a record of booleans, numbers and strings");
