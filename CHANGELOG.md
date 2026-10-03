@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-03
+
+- Offline activation exchange: the product emits a signed machine claim (fingerprint + nonce), the issuer returns a machine-bound license, with CLI `request` and `fulfil` subcommands and a documented flow for air-gapped installs, so a box that can never reach the issuer no longer has to be licensed by someone reading a fingerprint down the phone and hoping it was transcribed right.
+
 ## 2026-10-02
 
 - Metered limits: a tamper-evident `UsageLedger` (file and localStorage) that counts consumption against `limits` and refuses past the cap, with entries HMAC-chained with the license id so editing the file is detectable, so a product metering exports or seats no longer has to keep its own tally in a number anyone can lower.

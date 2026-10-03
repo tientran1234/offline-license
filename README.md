@@ -181,6 +181,108 @@ import { UsageLedger, LocalStorageLedgerStore } from "offline-license/web";
 const usage = new UsageLedger({ store: new LocalStorageLedgerStore(), claims });
 ```
 
+## Offline activation
+
+A machine with no network cannot ask for a license, so the asking becomes two
+blobs carried by hand. The product emits a request; the operator takes it to the
+issuer by email, USB stick or a line typed over the phone; the issuer signs a
+license bound to the machine named in it.
+
+```ts
+import { createActivationRequest, defaultFingerprint } from "offline-license";
+
+// On the air-gapped box.
+const request = createActivationRequest({
+  fingerprint: defaultFingerprint(),
+  licensee: "Acme Ltd",
+  product: "acme-cad",
+});
+// act1.eyJmaW5nZXJwcmludCI6… — carry this to the issuer
+```
+
+```ts
+import { fulfilActivation, readActivationRequest } from "offline-license";
+
+// On the issuing server, with the request in hand.
+const claim = readActivationRequest(request);   // ActivationError if it does not hold together
+claim.licensee;      // "Acme Ltd" — what the operator decides from
+claim.requestedAt;   // and how long it has been sitting in a drawer
+
+const token = fulfilActivation(privateKey, request, {
+  id: "lic_7f3a",
+  licensee: claim.licensee ?? "Acme Ltd",
+  features: ["export", "sso"],
+  issuedAt: now(),
+  expiresAt: now() + 365 * 86_400,
+});
+```
+
+`fulfilActivation` sets `machine` from the request's fingerprint and `activation`
+from its nonce, and the claims it accepts omit both: a caller free to pass either
+could bind a license to a machine that never asked for one, or stamp it with a
+nonce no install is waiting for.
+
+Back on the box, `verify` checks the binding as it does for any bound license.
+The nonce is checked once, when the license is installed:
+
+```ts
+import { answersRequest, verifyOrThrow } from "offline-license";
+
+const claims = verifyOrThrow(publicKey, token, { machineFingerprint: defaultFingerprint() });
+answersRequest(request, claims);   // is this the license this box asked for?
+```
+
+`answersRequest` is deliberately not one of `verify`'s checks. A license that
+answered the right request yesterday still does, so asking on every question
+would mean keeping the request for the life of the install to re-answer
+something that cannot change. What it catches is the one case the binding
+cannot: two requests from the same machine bind identically, so without the
+nonce the license issued for the earlier one — shorter, fewer features, or the
+one a renewal was meant to replace — installs as the answer to the request just
+made.
+
+**The request's signature is an integrity check, not an identity.** The product
+holds no private key, only the public one it verifies licenses with, so it signs
+with a key it generates and embeds in the request. Anyone who edits the payload
+can re-sign it under a fresh key and produce a request that reads perfectly.
+What the signature does buy is that a request cannot arrive *partly* mangled,
+which is what actually goes wrong when a blob travels by mail client and USB
+stick: a fingerprint a client line-wrapped, a nonce pasted next to the wrong
+machine, a paste that lost its last line. Each of those is `invalid_signature`
+on the operator's desk instead of a license bound to a fingerprint no machine
+will ever present.
+
+Who the customer is cannot be settled offline by anything the machine says about
+itself. `licensee` and `product` are labels for the operator, who decides, and
+there is nothing stronger to be had without a network — claiming otherwise would
+only move the trust somewhere less visible.
+
+An install that keeps its key gets one thing more. Pass `signingKey` and the
+request is signed by a key that outlives it, so an issuer recording the key it
+first saw can tell the same install asking again from a new one. That is more
+than the fingerprint says: hardware changes, and the fingerprint moves with it.
+
+From the shell the exchange is two commands, and they pipe:
+
+```bash
+# on the air-gapped box
+offline-license request --this-machine --licensee "Acme Ltd" --out ./request.act
+
+# on the issuer
+offline-license fulfil --key ./private.pem --id lic_7f3a \
+  --request-file ./request.act --feature sso --limit seats=25 --expires-in 365d
+```
+
+`fulfil` takes everything `issue` does except the machine flags — the binding
+comes from the request, which is the point of asking — and `--licensee` defaults
+to the one the request names. A request that does not hold together exits 2: it
+is input an operator can retype, not a license that was rejected.
+
+The exchange is Node-only. It happens where the install does, in an installer, a
+service, or a technician's shell, and the browser build has no fingerprint of
+its own to offer. What it produces is an ordinary token, so it verifies in both
+builds, and the shared vectors hold one.
+
 ## Grace period
 
 `expiresAt` is a cliff, and renewals do not land punctually. `graceSeconds`
@@ -218,7 +320,7 @@ offline-license verify --key ./public.pem --token "$LICENSE" --grace 604800
 
 ## CLI
 
-The same three operations from a shell, on `node:util` `parseArgs` — still no
+The same operations from a shell, on `node:util` `parseArgs` — still no
 dependencies.
 
 ```bash
@@ -244,6 +346,8 @@ Exit codes are the contract, because a release script branches on them:
 A rejected license and a mistyped flag never share a code. `verify` reads the
 token from stdin when given no `--token`, so `issue | verify` needs no temp
 file, and `--json` prints the whole `VerifyResult` without changing the code.
+
+`request` and `fulfil` are the two halves of the activation exchange, above.
 
 `--this-machine` binds to — or checks against — this box's
 `defaultFingerprint()`; `--machine <fingerprint>` issues for someone else's.
@@ -444,6 +548,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 195 tests: round-trip, tampering, time, grace, binding, clock, guard, features, metered limits, rotation, CLI, license files, the web build
+pnpm test                     # 229 tests: round-trip, tampering, time, grace, binding, clock, guard, features, metered limits, offline activation, rotation, CLI, license files, the web build
 pnpm build                    # ESM + .d.ts into dist/
 ```
