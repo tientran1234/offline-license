@@ -2,6 +2,13 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import {
+  createActivationRequest,
+  fulfilActivation,
+  readActivationRequest,
+  type ActivationRequestInput,
+  type MachineClaim,
+} from "./activation.js";
 import type { FeatureValue, Features, LicenseClaims } from "./claims.js";
 import type { VerifyOptions } from "./core.js";
 import { issue } from "./issue.js";
@@ -36,6 +43,8 @@ const HELP = {
   keygen   [--out <dir>]
   issue    --key <private.pem> --id <id> --licensee <name> [options]
   verify   --key <public.pem> [--token <token> | --token-file <file>]
+  request  --this-machine | --machine <fingerprint> [options]
+  fulfil   --key <private.pem> --id <id> [--request <request>] [options]
 
 Exit codes: 0 done / valid, 1 license rejected, 2 bad usage.
 Run \`offline-license <command> --help\` for one command's options.
@@ -85,6 +94,37 @@ Clock-rollback detection is deliberately absent: the high-water mark only means
 something across a process's lifetime, so it belongs to MonotonicClock in a
 long-lived product, not to a command that exits.
 `,
+  request: `offline-license request --this-machine | --machine <fingerprint> [options]
+
+  --this-machine      Ask for a license for this box's defaultFingerprint().
+  --machine <fp>      Ask for one for the fingerprint given instead.
+  --licensee <name>   Who is asking. A label the issuer's operator reads.
+  --product <name>    Which product, for an issuer that signs for several.
+  --signing-key <f>   PKCS#8 PEM to sign the request with, for an install that
+                      keeps one key across requests. Without it a key is
+                      generated for this request and thrown away.
+  --now <t>           Override requestedAt. Unix seconds or ISO 8601.
+  --out <file>        Write the request there instead of stdout.
+
+Prints an act1.… request to carry to the issuer. Nothing secret is in it: the
+fingerprint, a nonce, and the key it is signed with.
+`,
+  fulfil: `offline-license fulfil --key <private.pem> --id <id> [--request <request>] [options]
+
+  --key <file>        PKCS#8 PEM of the issuing private key.
+  --request <req>     The act1.… request. Read from stdin when neither this nor
+                      --request-file is given.
+  --request-file <f>  Read the request from a file.
+  --id <id>           Unique license id. Also keys the machine binding.
+  --licensee <name>   Defaults to the licensee the request names.
+
+Everything \`issue\` accepts for features, limits, metadata, expiry and --kid
+works here too. The machine binding is not among them: it comes from the
+request, which is the point of asking.
+
+A request that does not hold together exits 2 — it is input an operator can
+retype, not a license that was rejected.
+`,
 };
 
 export async function run(argv: readonly string[], io: CliIo): Promise<number> {
@@ -97,6 +137,10 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
         return await issueCommand(rest, io);
       case "verify":
         return await verifyCommand(rest, io);
+      case "request":
+        return await requestCommand(rest, io);
+      case "fulfil":
+        return await fulfilCommand(rest, io);
       case "help":
       case "--help":
       case "-h":
@@ -150,37 +194,46 @@ async function keygen(argv: readonly string[], io: CliIo): Promise<number> {
   return OK;
 }
 
-async function issueCommand(argv: readonly string[], io: CliIo): Promise<number> {
-  const { values } = parseArgs({
-    args: [...argv],
-    options: {
-      key: { type: "string" },
-      id: { type: "string" },
-      licensee: { type: "string" },
-      feature: { type: "string", multiple: true },
-      limit: { type: "string", multiple: true },
-      meta: { type: "string", multiple: true },
-      "expires-in": { type: "string" },
-      "expires-at": { type: "string" },
-      "not-before": { type: "string" },
-      kid: { type: "string" },
-      machine: { type: "string" },
-      "this-machine": { type: "boolean" },
-      now: { type: "string" },
-      out: { type: "string" },
-      help: { type: "boolean", short: "h" },
-    },
-  });
-  if (values.help) {
-    io.out(HELP.issue);
-    return OK;
-  }
+/**
+ * The flags that describe a license. `issue` and `fulfil` sign the same claims
+ * from the same input; they differ only in where the machine binding comes from,
+ * so the flags that build the claims are declared once.
+ */
+const CLAIM_OPTIONS = {
+  key: { type: "string" },
+  id: { type: "string" },
+  licensee: { type: "string" },
+  feature: { type: "string", multiple: true },
+  limit: { type: "string", multiple: true },
+  meta: { type: "string", multiple: true },
+  "expires-in": { type: "string" },
+  "expires-at": { type: "string" },
+  "not-before": { type: "string" },
+  kid: { type: "string" },
+  now: { type: "string" },
+  out: { type: "string" },
+  help: { type: "boolean", short: "h" },
+} as const;
 
-  const id = required(values.id, "--id");
+/** What claimsFrom reads — the parsed CLAIM_OPTIONS, named so a second command can pass them. */
+interface ClaimValues {
+  id?: string | undefined;
+  feature?: readonly string[] | undefined;
+  limit?: readonly string[] | undefined;
+  meta?: readonly string[] | undefined;
+  "expires-in"?: string | undefined;
+  "expires-at"?: string | undefined;
+  "not-before"?: string | undefined;
+  kid?: string | undefined;
+  now?: string | undefined;
+}
+
+/** The licensee is a parameter because `fulfil` may take it from the request. */
+function claimsFrom(values: ClaimValues, licensee: string): LicenseClaims {
   const issuedAt = values.now === undefined ? nowSeconds() : asTime(values.now, "--now");
   const claims: LicenseClaims = {
-    id,
-    licensee: required(values.licensee, "--licensee"),
+    id: required(values.id, "--id"),
+    licensee,
     features: features(values.feature),
     issuedAt,
   };
@@ -203,23 +256,123 @@ async function issueCommand(argv: readonly string[], io: CliIo): Promise<number>
   }
 
   if (values.kid !== undefined) claims.kid = values.kid;
+  return claims;
+}
 
-  const fingerprint = machineFingerprint(values.machine, values["this-machine"]);
-  if (fingerprint !== undefined) claims.machine = bindMachine(id, fingerprint);
-
-  const privateKey = await readText(required(values.key, "--key"), "--key");
-  let token: string;
-  try {
-    token = issue(privateKey, claims);
-  } catch (err) {
-    // A rejected key or a claim combination the library refuses to sign is bad
-    // input, not a failure — report it as such rather than dumping a stack.
-    throw new UsageError((err as Error).message);
+async function issueCommand(argv: readonly string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: { ...CLAIM_OPTIONS, machine: { type: "string" }, "this-machine": { type: "boolean" } },
+  });
+  if (values.help) {
+    io.out(HELP.issue);
+    return OK;
   }
 
-  if (values.out === undefined) io.out(`${token}\n`);
-  else await writeFile(values.out, `${token}\n`, "utf8");
+  const claims = claimsFrom(values, required(values.licensee, "--licensee"));
+  const fingerprint = machineFingerprint(values.machine, values["this-machine"]);
+  if (fingerprint !== undefined) claims.machine = bindMachine(claims.id, fingerprint);
+
+  return await emit(values.key, values.out, io, (privateKey) => issue(privateKey, claims));
+}
+
+async function requestCommand(argv: readonly string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      machine: { type: "string" },
+      "this-machine": { type: "boolean" },
+      licensee: { type: "string" },
+      product: { type: "string" },
+      "signing-key": { type: "string" },
+      now: { type: "string" },
+      out: { type: "string" },
+      help: { type: "boolean", short: "h" },
+    },
+  });
+  if (values.help) {
+    io.out(HELP.request);
+    return OK;
+  }
+
+  const fingerprint = machineFingerprint(values.machine, values["this-machine"]);
+  if (fingerprint === undefined) {
+    // There is no default. A request for a fingerprint nobody chose would come
+    // back as a license bound to whichever box happened to run the command.
+    throw new UsageError("--this-machine or --machine <fingerprint> is required");
+  }
+
+  const input: ActivationRequestInput = { fingerprint };
+  if (values.licensee !== undefined) input.licensee = values.licensee;
+  if (values.product !== undefined) input.product = values.product;
+  if (values.now !== undefined) input.requestedAt = asTime(values.now, "--now");
+  if (values["signing-key"] !== undefined) {
+    input.signingKey = await readText(values["signing-key"], "--signing-key");
+  }
+
+  let request: string;
+  try {
+    request = createActivationRequest(input);
+  } catch (err) {
+    throw new UsageError((err as Error).message);
+  }
+  await write(request, values.out, io);
   return OK;
+}
+
+async function fulfilCommand(argv: readonly string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: { ...CLAIM_OPTIONS, request: { type: "string" }, "request-file": { type: "string" } },
+  });
+  if (values.help) {
+    io.out(HELP.fulfil);
+    return OK;
+  }
+
+  const request = (await readBlob(values.request, values["request-file"], "--request", io)).trim();
+  let claim: MachineClaim;
+  try {
+    claim = readActivationRequest(request);
+  } catch (err) {
+    // A request the operator pasted is input they can retype, so it exits 2 and
+    // the reason says which of the three ways it failed to hold together.
+    throw new UsageError(`--request: ${(err as Error).message}`);
+  }
+
+  const licensee = values.licensee ?? claim.licensee;
+  if (licensee === undefined) throw new UsageError("--licensee is required: the request does not name one");
+
+  const claims = claimsFrom(values, licensee);
+  return await emit(values.key, values.out, io, (privateKey) => fulfilActivation(privateKey, request, claims));
+}
+
+/**
+ * Read the key, sign, and put the result where the operator asked.
+ *
+ * A key the library rejects, or a claim combination it refuses to sign, is bad
+ * input rather than a failure — report it as such instead of dumping a stack.
+ */
+async function emit(
+  keyFlag: string | undefined,
+  out: string | undefined,
+  io: CliIo,
+  signer: (privateKey: string) => string,
+): Promise<number> {
+  const privateKey = await readText(required(keyFlag, "--key"), "--key");
+  let token: string;
+  try {
+    token = signer(privateKey);
+  } catch (err) {
+    throw new UsageError((err as Error).message);
+  }
+  await write(token, out, io);
+  return OK;
+}
+
+async function write(text: string, out: string | undefined, io: CliIo): Promise<void> {
+  if (out === undefined) io.out(`${text}\n`);
+  else await writeFile(out, `${text}\n`, "utf8");
 }
 
 async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number> {
@@ -244,7 +397,7 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
   }
 
   const publicKey = await readKeys(values.key);
-  const token = (await readToken(values.token, values["token-file"], io)).trim();
+  const token = (await readBlob(values.token, values["token-file"], "--token", io)).trim();
 
   const options: VerifyOptions = {};
   if (values.now !== undefined) {
@@ -304,12 +457,22 @@ async function readKeys(entries: readonly string[] | undefined): Promise<PublicK
   return ring;
 }
 
-async function readToken(token: string | undefined, file: string | undefined, io: CliIo): Promise<string> {
-  if (token !== undefined && file !== undefined) {
-    throw new UsageError("--token and --token-file are mutually exclusive");
+/**
+ * A blob the operator supplies inline, from a file, or on stdin — a token for
+ * `verify`, a request for `fulfil`. Stdin is what lets `issue | verify` and
+ * `request | fulfil` work without a temp file.
+ */
+async function readBlob(
+  inline: string | undefined,
+  file: string | undefined,
+  flag: string,
+  io: CliIo,
+): Promise<string> {
+  if (inline !== undefined && file !== undefined) {
+    throw new UsageError(`${flag} and ${flag}-file are mutually exclusive`);
   }
-  if (token !== undefined) return token;
-  if (file !== undefined) return readText(file, "--token-file");
+  if (inline !== undefined) return inline;
+  if (file !== undefined) return readText(file, `${flag}-file`);
   return io.stdin();
 }
 

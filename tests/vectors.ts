@@ -1,5 +1,12 @@
 import { createPrivateKey, sign } from "node:crypto";
-import { bindMachine, issue, type VerifyOptions, type VerifyResult } from "../src/index.js";
+import {
+  bindMachine,
+  createActivationRequest,
+  fulfilActivation,
+  issue,
+  type VerifyOptions,
+  type VerifyResult,
+} from "../src/index.js";
 import { at, claims, keys, otherKeys, NOW } from "./helpers.js";
 
 /**
@@ -30,6 +37,15 @@ const bound = claims({ machine: bindMachine(claims().id, FINGERPRINT) });
 const future = claims({ notBefore: NOW + DAY, expiresAt: NOW + 30 * DAY });
 const rotated = claims({ kid: "2026" });
 const valued = claims({ features: { sso: true, seats: 25, tier: "pro", beta: false } });
+
+/** A real exchange, with the nonce pinned so the token is reproducible. */
+const ACTIVATION_NONCE = "mUoBrUO3tdZr2W7N";
+const activationRequest = createActivationRequest({
+  fingerprint: FINGERPRINT,
+  nonce: ACTIVATION_NONCE,
+  requestedAt: NOW - 3600,
+});
+const activated = claims({ machine: bindMachine(claims().id, FINGERPRINT), activation: ACTIVATION_NONCE });
 
 /** Signed by the real key, but the payload is not a license. */
 function signedNonsense(): string {
@@ -155,6 +171,22 @@ export const vectors: readonly Vector[] = [
     token: issue(keys.privateKey, valued),
     options: { now: at(NOW) },
     expected: { ok: true, claims: valued },
+  },
+  {
+    // The web build never makes a request — the exchange happens where the
+    // install does — but it has to verify the license one produced.
+    name: "a license issued in answer to an activation request",
+    publicKey: keys.publicKey,
+    token: fulfilActivation(keys.privateKey, activationRequest, claims()),
+    options: { now: at(NOW), machineFingerprint: FINGERPRINT },
+    expected: { ok: true, claims: activated },
+  },
+  {
+    name: "a license issued in answer to an activation request, on another machine",
+    publicKey: keys.publicKey,
+    token: fulfilActivation(keys.privateKey, activationRequest, claims()),
+    options: { now: at(NOW), machineFingerprint: OTHER_FINGERPRINT },
+    expected: { ok: false, reason: "machine_mismatch", claims: activated },
   },
   {
     name: "a ring, and a kid naming the key that signed",

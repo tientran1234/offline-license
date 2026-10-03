@@ -14,11 +14,13 @@ export { bindMachine, defaultFingerprint } from "./machine.js";
 export {
   ACTIVATION_PREFIX,
   ActivationError,
+  answersRequest,
   assertMachineClaim,
   createActivationRequest,
+  fulfilActivation,
   readActivationRequest,
 } from "./activation.js";
-export type { ActivationRequestInput, MachineClaim } from "./activation.js";
+export type { ActivationRequestInput, FulfilmentClaims, MachineClaim } from "./activation.js";
 
 export { readLicenseFile, writeLicenseFile, LicenseFileError, LICENSE_FILE_VERSION } from "./file.js";
 export type { LicenseFile, LicenseFileInput } from "./file.js";

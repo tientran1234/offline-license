@@ -2,12 +2,18 @@ import { describe, expect, it } from "vitest";
 import { createPrivateKey, sign } from "node:crypto";
 import {
   ActivationError,
+  answersRequest,
+  assertClaims,
+  ClaimsError,
   createActivationRequest,
+  fulfilActivation,
   generateKeyPair,
+  issue,
   readActivationRequest,
+  verify,
   type MachineClaim,
 } from "../src/index.js";
-import { NOW } from "./helpers.js";
+import { at, claims, keys, NOW } from "./helpers.js";
 
 const FINGERPRINT = "7b2e-air-gapped-box";
 
@@ -122,5 +128,80 @@ describe("a request that does not hold together", () => {
 
   it("is invalid claims when the payload is not JSON at all", () => {
     expect(reason(() => readActivationRequest("act1.bm90LWpzb24.c2ln"))).toBe("invalid_claims");
+  });
+});
+
+describe("the license that answers a request", () => {
+  const licensed = (req: string) => fulfilActivation(keys.privateKey, req, claims());
+  const check = (token: string, fingerprint: string) =>
+    verify(keys.publicKey, token, { now: at(NOW), machineFingerprint: fingerprint });
+
+  it("is bound to the machine that asked, and verifies nowhere else", () => {
+    const token = licensed(request());
+
+    expect(check(token, FINGERPRINT).ok).toBe(true);
+    expect(check(token, "a-different-box")).toEqual({
+      ok: false,
+      reason: "machine_mismatch",
+      claims: expect.objectContaining({ id: claims().id }),
+    });
+    // No fingerprint at all is the copied-license case, and fails the same way.
+    expect(verify(keys.publicKey, token, { now: at(NOW) }).ok).toBe(false);
+  });
+
+  it("carries the nonce of the request it answers", () => {
+    const req = request();
+    const result = check(licensed(req), FINGERPRINT);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.claims.activation).toBe(readActivationRequest(req).nonce);
+    expect(answersRequest(req, result.ok ? result.claims : claims())).toBe(true);
+  });
+
+  it("keeps everything else the issuer chose", () => {
+    const token = fulfilActivation(keys.privateKey, request(), claims({ features: { sso: true, tier: "pro" } }));
+    const result = check(token, FINGERPRINT);
+
+    expect(result.ok && result.claims.features).toEqual({ sso: true, tier: "pro" });
+    expect(result.ok && result.claims.limits).toEqual({ seats: 10 });
+  });
+
+  it("is not an answer to a request it was not issued for", () => {
+    // Both requests name the same machine, so the binding alone cannot tell them
+    // apart: the nonce is what stops the license meant for the earlier request —
+    // shorter, or the one a renewal replaces — installing as the one just asked for.
+    const first = request();
+    const second = request();
+    const token = licensed(first);
+    const installed = verify(keys.publicKey, token, { now: at(NOW), machineFingerprint: FINGERPRINT });
+
+    expect(installed.ok).toBe(true);
+    expect(installed.ok && answersRequest(first, installed.claims)).toBe(true);
+    expect(installed.ok && answersRequest(second, installed.claims)).toBe(false);
+  });
+
+  it("is not an answer when it is bound to another machine", () => {
+    const req = request();
+    const sameNonce = request({ nonce: readActivationRequest(req).nonce, fingerprint: "other-box" });
+    const elsewhere = fulfilActivation(keys.privateKey, sameNonce, claims());
+    const result = verify(keys.publicKey, elsewhere, { now: at(NOW), machineFingerprint: "other-box" });
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && answersRequest(req, result.claims)).toBe(false);
+  });
+
+  it("is not an answer when it came from no request at all", () => {
+    const plain = issue(keys.privateKey, claims());
+    expect(answersRequest(request(), claims())).toBe(false);
+    expect(verify(keys.publicKey, plain, { now: at(NOW) }).ok).toBe(true);
+  });
+
+  it("is refused outright when the request does not hold together", () => {
+    const edited = reclaim(request(), { fingerprint: "someone-elses-box" });
+    expect(() => fulfilActivation(keys.privateKey, edited, claims())).toThrow(ActivationError);
+  });
+
+  it("will not take a nonce that is not a string, whoever wrote it", () => {
+    expect(() => assertClaims({ ...claims(), activation: 7 })).toThrow(ClaimsError);
   });
 });

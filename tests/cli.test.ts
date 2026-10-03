@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
-import { verify } from "../src/index.js";
+import { createActivationRequest, verify } from "../src/index.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const CLI = join(root, "dist", "cli.js");
@@ -48,9 +48,25 @@ beforeAll(async () => {
   const result = await cli(["keygen", "--out", dir]);
   expect(result.code).toBe(0);
   keys = { dir, private: join(dir, "private.pem"), public: join(dir, "public.pem") };
+
+  UNNAMED_REQUEST = createActivationRequest({ fingerprint: "fp-unnamed" });
+  const signed = createActivationRequest({ fingerprint: "fp-original", licensee: "Acme Ltd" });
+  const [prefix, payload, signature] = signed.split(".") as [string, string, string];
+  const claim = JSON.parse(Buffer.from(payload, "base64url").toString()) as Record<string, unknown>;
+  claim.fingerprint = "fp-someone-else";
+  const edited = Object.fromEntries(Object.keys(claim).sort().map((k) => [k, claim[k]]));
+  TAMPERED_REQUEST = `${prefix}.${Buffer.from(JSON.stringify(edited)).toString("base64url")}.${signature}`;
 }, 120_000);
 
 const issueArgs = () => ["issue", "--key", keys.private, "--id", "lic_cli", "--licensee", "Acme Ltd"];
+
+const fulfilArgs = (request: string) => [
+  "fulfil", "--key", keys.private, "--id", "lic_act", "--licensee", "Acme Ltd", "--request", request,
+];
+
+/** A request whose fingerprint was edited after signing, and one naming no licensee. */
+let TAMPERED_REQUEST: string;
+let UNNAMED_REQUEST: string;
 
 const issued = async (...args: string[]) => {
   const result = await cli([...issueArgs(), ...args]);
@@ -203,6 +219,81 @@ describe("verify", () => {
   });
 });
 
+describe("the activation exchange", () => {
+  const requested = async (...args: string[]) => {
+    const result = await cli(["request", ...args]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    return result.stdout.trim();
+  };
+
+  const fulfilled = async (request: string, ...args: string[]) => {
+    const result = await cli(["fulfil", "--key", keys.private, "--id", "lic_act", "--request", request, ...args]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    return result.stdout.trim();
+  };
+
+  it("binds the license to the machine that asked, and to no other", async () => {
+    const request = await requested("--this-machine", "--licensee", "Acme Ltd");
+    expect(request.startsWith("act1.")).toBe(true);
+
+    const token = await fulfilled(request, "--feature", "sso", "--expires-in", "365d");
+    expect((await cli(["verify", "--key", keys.public, "--token", token, "--this-machine"])).code).toBe(0);
+
+    const elsewhere = await cli(["verify", "--key", keys.public, "--token", token]);
+    expect(elsewhere.code).toBe(1);
+    expect(elsewhere.stderr).toContain("machine_mismatch");
+  });
+
+  it("names the licensee from the request when the flag is absent", async () => {
+    const request = await requested("--machine", "fp-of-a-box-elsewhere", "--licensee", "Globex SA");
+    const result = verify(await readFile(keys.public, "utf8"), await fulfilled(request), {
+      machineFingerprint: "fp-of-a-box-elsewhere",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.claims.licensee).toBe("Globex SA");
+    expect(result.ok && result.claims.activation).not.toBe(undefined);
+  });
+
+  it("pipes a request straight into fulfil, so neither end needs a temp file", async () => {
+    const request = await requested("--machine", "fp-piped");
+    const { code, stdout } = await cli(
+      ["fulfil", "--key", keys.private, "--id", "lic_act", "--licensee", "Acme Ltd"],
+      `${request}\n`,
+    );
+
+    expect(code).toBe(0);
+    expect(verify(await readFile(keys.public, "utf8"), stdout.trim(), { machineFingerprint: "fp-piped" }).ok).toBe(true);
+  });
+
+  it("reads a request from a file, and writes the license to one", async () => {
+    const requestPath = join(keys.dir, "request.act");
+    const tokenPath = join(keys.dir, "fulfilled.lic");
+    expect((await cli(["request", "--machine", "fp-on-disk", "--out", requestPath])).code).toBe(0);
+
+    const { code } = await cli([
+      "fulfil", "--key", keys.private, "--id", "lic_act", "--licensee", "Acme Ltd",
+      "--request-file", requestPath, "--out", tokenPath,
+    ]);
+    expect(code).toBe(0);
+
+    const token = (await readFile(tokenPath, "utf8")).trim();
+    expect(verify(await readFile(keys.public, "utf8"), token, { machineFingerprint: "fp-on-disk" }).ok).toBe(true);
+  });
+
+  it("signs successive requests with one kept key, so the issuer sees the same install", async () => {
+    const first = await requested("--machine", "fp-kept", "--signing-key", keys.private);
+    const second = await requested("--machine", "fp-kept", "--signing-key", keys.private);
+
+    const keyOf = (request: string) =>
+      (JSON.parse(Buffer.from(request.split(".")[1] as string, "base64url").toString()) as { key: string }).key;
+    expect(keyOf(second)).toBe(keyOf(first));
+    expect(keyOf(await requested("--machine", "fp-kept"))).not.toBe(keyOf(first));
+  });
+});
+
 describe("usage errors exit 2, never 1", () => {
   // Each case names a fragment of its own message: exiting 2 for some other
   // reason (an unreadable key, say) would otherwise pass for the wrong one.
@@ -219,6 +310,11 @@ describe("usage errors exit 2, never 1", () => {
     ["contradictory machine flags", () => [...issueArgs(), "--machine", "fp", "--this-machine"], "mutually exclusive"],
     ["two ways to supply a token", () => ["verify", "--key", keys.public, "--token", "t", "--token-file", "f"], "mutually exclusive"],
     ["an unnamed key among several", () => ["verify", "--key", keys.public, "--key", `new=${keys.public}`, "--token", "t"], "<kid>=<file>"],
+    ["a request naming no machine", () => ["request"], "--this-machine or --machine"],
+    ["a request that is not a request", () => fulfilArgs("not-a-request"), "--request: expected an act1."],
+    ["a request edited in transit", () => fulfilArgs(TAMPERED_REQUEST), "--request: the request is not signed"],
+    ["a fulfil with no licensee anywhere", () => ["fulfil", "--key", keys.private, "--id", "x", "--request", UNNAMED_REQUEST], "--licensee is required"],
+    ["a fulfil told to bind a machine itself", () => [...fulfilArgs(UNNAMED_REQUEST), "--machine", "fp"], "Unknown option"],
   ])("%s", async (_name, args, fragment) => {
     const { code, stderr } = await cli(args());
     expect(code).toBe(2);
@@ -235,10 +331,10 @@ describe("usage errors exit 2, never 1", () => {
 });
 
 describe("help", () => {
-  it("exits 0 and lists the three commands", async () => {
+  it("exits 0 and lists every command", async () => {
     const { code, stdout } = await cli(["help"]);
     expect(code).toBe(0);
-    for (const command of ["keygen", "issue", "verify"]) expect(stdout).toContain(command);
+    for (const command of ["keygen", "issue", "verify", "request", "fulfil"]) expect(stdout).toContain(command);
   });
 
   it("documents one command at a time", async () => {

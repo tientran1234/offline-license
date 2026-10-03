@@ -1,6 +1,9 @@
 import { createPublicKey, generateKeyPairSync, randomBytes, sign, verify as cryptoVerify } from "node:crypto";
+import type { LicenseClaims } from "./claims.js";
 import { canonicalJson, fromBase64Url, toBase64Url } from "./encoding.js";
+import { issue } from "./issue.js";
 import { toPrivateKey, type KeyInput } from "./keys.js";
+import { bindMachine } from "./machine.js";
 
 /**
  * Activation for installs that cannot reach the issuer.
@@ -143,6 +146,44 @@ function signatureOk(key: string, signed: string, signature: string): boolean {
     // same verdict as a signature that does not match it.
     return false;
   }
+}
+
+/**
+ * What an issuer decides. The machine binding and the nonce are not among it:
+ * both come from the request, and a caller free to pass either could bind a
+ * license to a machine that never asked for one, or stamp it with a nonce no
+ * install is waiting for — which is the whole of what the exchange establishes.
+ */
+export type FulfilmentClaims = Omit<LicenseClaims, "machine" | "activation">;
+
+/** Answer a request: the license the issuer signs, bound to the machine that asked. */
+export function fulfilActivation(privateKey: KeyInput, request: string, claims: FulfilmentClaims): string {
+  const claim = readActivationRequest(request);
+  return issue(privateKey, {
+    ...claims,
+    machine: bindMachine(claims.id, claim.fingerprint),
+    activation: claim.nonce,
+  });
+}
+
+/**
+ * Whether a license is the answer to this request.
+ *
+ * Checked once, when the license is installed, which is why it is not one of
+ * verify()'s checks: a license that answered the right request yesterday still
+ * does, and asking on every question would mean keeping the request for the
+ * life of the install to re-answer something that cannot change. What verify()
+ * goes on checking is the binding — that is the claim with teeth, and it is in
+ * the token.
+ *
+ * The nonce is what makes the pairing visible. Two requests from one machine
+ * bind identically, so without it a license issued for the earlier request —
+ * shorter, fewer features, or simply the one the renewal was meant to replace —
+ * installs as though it were the one just asked for.
+ */
+export function answersRequest(request: string, claims: LicenseClaims): boolean {
+  const claim = readActivationRequest(request);
+  return claims.activation === claim.nonce && claims.machine === bindMachine(claims.id, claim.fingerprint);
 }
 
 /** Runtime shape check for a payload off the wire — the signature does not vouch for it. */
