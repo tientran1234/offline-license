@@ -39,6 +39,7 @@ license.assertFeature("billing");   // throws LicenseError { reason: "invalid_cl
 | Shape `lic1.<payload>.<sig>` | `malformed` | Cheapest, and it rejects the most junk |
 | Ed25519 signature over `lic1.<payload>` | `invalid_signature` | Nothing below reads a byte an attacker could have written |
 | Claims schema | `invalid_claims` | A valid signature over the wrong shape is still not a license |
+| Renewal chain, when a predecessor is given | `renewal_gap` | A renewal from the wrong generation is the wrong file whatever the clock says |
 | Clock has not gone backwards | `clock_rollback` | An expired license becomes "valid" if the clock is set back — check before expiry |
 | `notBefore` / `expiresAt` (± skew) | `not_yet_valid` / `expired` | A grace period, when set, only moves where `expired` begins |
 | Machine binding | `machine_mismatch` | |
@@ -318,6 +319,82 @@ offline-license verify --key ./public.pem --token "$LICENSE" --grace 604800
 # expired_in_grace: Acme Ltd (lic_7f3a), expires 2026-09-01T00:00:00.000Z
 ```
 
+## Renewal chain
+
+A renewal is an ordinary license with one extra claim: `renews`, the id of the
+license it replaces. That link is what lets an install tell the renewal it asked
+for from a file handed to it out of order.
+
+```ts
+const next = issue(privateKey, {
+  id: "lic_2027",
+  renews: "lic_2026",            // the license this one replaces
+  licensee: "Acme Ltd",
+  features: ["export", "sso"],
+  issuedAt: now(),
+  notBefore: FEBRUARY_FIRST,     // the new term, which may not have started yet
+  expiresAt: FEBRUARY_FIRST + 365 * 86_400,
+});
+
+// In the product, which is holding the license being replaced.
+verify(publicKey, next, { previous: installed, graceSeconds: 7 * 86_400 });
+```
+
+`previous` is the claims of the license currently installed — whatever an
+earlier `verify` handed back — and supplying it is what turns the chain checks
+on. Two things come out of them.
+
+**A renewal that skips a generation is refused**, with reason `renewal_gap`.
+Each license is issued to follow one particular predecessor, so a token naming a
+different one is either a file held back from an earlier term or a license for
+another chain, and without the link either installs as though it were the next
+one. The claims come back on the failure, as they do on expiry, so a screen can
+say which license was offered and which one the box actually holds.
+
+**A renewal whose term has not begun is accepted while the license it replaces
+is in grace**, reported as `expired_in_grace`. Renewals are dated from the start
+of the next term and installed whenever the operator gets to them; in between,
+the product has already swapped the file and the old license it would otherwise
+fall back on is gone. Blocking there would lock out a customer whose entitlement
+never lapsed, which is the thing grace exists to avoid.
+
+The window is the predecessor's, so it ends where that one does: past
+`expiresAt + graceSeconds` the reason is `not_yet_valid` again, until the new
+term genuinely starts. The concession is that the new terms begin up to one
+grace window early — the trade for not going dark between terms, bounded by a
+window the issuer already chose. Nothing else is softened: a machine mismatch or
+a rolled-back clock inside the inherited window fails exactly as it does
+outside.
+
+Keep the old license file until the renewal verifies against it. The window a
+renewal inherits is the predecessor's grace, which means the predecessor's
+claims, and an install that threw them away has nothing to inherit from.
+
+A product that does not renew in chains sees no change. A token carrying no
+`renews` is not a renewal — an issuer re-issuing from scratch says so by leaving
+it out — and with no `previous` supplied there is nothing to check against, so
+`renews` is a field the install may display and nothing more. A license whose
+`renews` names itself is `invalid_claims`: a chain of one is a mistake in the
+issuer, not an unusual link.
+
+From the shell:
+
+```bash
+offline-license issue --key ./private.pem --id lic_2027 --renews lic_2026 \
+  --licensee "Acme Ltd" --not-before 2027-02-01 --expires-at 2028-02-01
+
+# $INSTALLED ran out on 1 January and the new term starts on 1 February, so in
+# between the renewal verifies on the week of grace the old license still has.
+offline-license verify --key ./public.pem --token "$RENEWAL" \
+  --previous "$INSTALLED" --grace 604800
+# expired_in_grace: Acme Ltd (lic_2027), expires 2028-02-01T00:00:00.000Z
+```
+
+`--previous` takes the predecessor's own token and reads the id and the expiry
+out of it under the same key. Those two claims decide how long the inherited
+window runs, and an expiry anyone could edit with a text editor would be no
+window at all.
+
 ## CLI
 
 The same operations from a shell, on `node:util` `parseArgs` — still no
@@ -548,6 +625,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 229 tests: round-trip, tampering, time, grace, binding, clock, guard, features, metered limits, offline activation, rotation, CLI, license files, the web build
+pnpm test                     # 252 tests: round-trip, tampering, time, grace, renewals, binding, clock, guard, features, metered limits, offline activation, rotation, CLI, license files, the web build
 pnpm build                    # ESM + .d.ts into dist/
 ```

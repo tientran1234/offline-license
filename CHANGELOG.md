@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-04
+
+- Renewal chain: a license may carry `renews: <previous id>`, `verify` accepts the newer license while the old one is in grace, and a renewal that skips a generation is refused as `renewal_gap`, so a late renewal no longer leaves an install dark between terms and a license kept back from an earlier term cannot be installed as the current one.
+
 ## 2026-10-03
 
 - Offline activation exchange: the product emits a signed machine claim (fingerprint + nonce), the issuer returns a machine-bound license, with CLI `request` and `fulfil` subcommands and a documented flow for air-gapped installs, so a box that can never reach the issuer no longer has to be licensed by someone reading a fingerprint down the phone and hoping it was transcribed right.
