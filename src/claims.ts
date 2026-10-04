@@ -30,6 +30,14 @@ export interface LicenseClaims {
   kid?: string;
   /** The nonce of the activation request this license answers. Set by fulfilActivation(). */
   activation?: string;
+  /**
+   * The id of the license this one replaces, when it is a renewal.
+   *
+   * A link and not a term: it says which license the install should be holding
+   * when this one arrives, so a renewal cannot be installed over a generation
+   * it was never meant to follow. See checkRenewal.
+   */
+  renews?: string;
   metadata?: Readonly<Record<string, string>>;
 }
 
@@ -50,6 +58,7 @@ export function assertClaims(value: unknown): asserts value is LicenseClaims {
   optionalString(c, "machine");
   optionalString(c, "kid");
   optionalString(c, "activation");
+  optionalString(c, "renews");
 
   if (!isFeatures(c.features)) {
     throw new ClaimsError("features must be a string array, or a record of booleans, numbers and strings");
@@ -59,6 +68,12 @@ export function assertClaims(value: unknown): asserts value is LicenseClaims {
   }
   if (c.metadata !== undefined) {
     if (!isRecordOf(c.metadata, "string")) throw new ClaimsError("metadata must map to strings");
+  }
+  if (c.renews === c.id) {
+    // A license renewing itself names no predecessor at all, and every chain
+    // check against it would pass vacuously. That is a mistake in the issuer,
+    // not a license with an unusual link.
+    throw new ClaimsError("renews must name another license, not this one");
   }
   const expiresAt = c.expiresAt;
   const notBefore = c.notBefore;
