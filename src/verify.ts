@@ -1,14 +1,23 @@
 import { verify as cryptoVerify, type KeyObject } from "node:crypto";
 import { assertClaims, ClaimsError, type LicenseClaims } from "./claims.js";
-import { checkTime, LicenseError, TOKEN_PREFIX, type VerifyOptions, type VerifyResult } from "./core.js";
+import {
+  checkRenewal,
+  checkTime,
+  LicenseError,
+  TOKEN_PREFIX,
+  type VerifyOptions,
+  type VerifyResult,
+} from "./core.js";
 import { fromBase64Url } from "./encoding.js";
 import { isKeyRing, toPublicKey, type PublicKeyInput } from "./keys.js";
 import { bindMachine } from "./machine.js";
 
 /**
  * Check a token. Every check runs in order: signature before anything else, so
- * nothing below ever reasons about claims an attacker wrote. Choosing the key
- * by `kid` is not one of the checks — see selectKeys.
+ * nothing below ever reasons about claims an attacker wrote. The chain comes
+ * before the clock, because a renewal from the wrong generation is the wrong
+ * file whatever the time is. Choosing the key by `kid` is not one of the
+ * checks — see selectKeys.
  */
 export function verify(publicKey: PublicKeyInput, token: string, options: VerifyOptions = {}): VerifyResult {
   const parts = token.split(".");
@@ -34,11 +43,21 @@ export function verify(publicKey: PublicKeyInput, token: string, options: Verify
     throw err;
   }
 
+  const now = options.now?.() ?? Math.floor(Date.now() / 1000);
+  const renewal = checkRenewal(claims, {
+    previous: options.previous,
+    now,
+    skewSeconds: options.skewSeconds,
+    graceSeconds: options.graceSeconds,
+  });
+  if (!renewal.ok) return { ok: false, reason: renewal.reason, claims };
+
   const timing = checkTime(claims, {
-    now: options.now?.() ?? Math.floor(Date.now() / 1000),
+    now,
     clock: options.clock,
     skewSeconds: options.skewSeconds,
     graceSeconds: options.graceSeconds,
+    inheritsGrace: renewal.inheritsGrace,
   });
   if (!timing.ok) return { ok: false, reason: timing.reason, claims };
 

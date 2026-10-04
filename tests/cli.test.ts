@@ -179,6 +179,44 @@ describe("verify", () => {
     expect(past.stderr).toContain("expired");
   });
 
+  it("carries a renewal on the predecessor's grace, and refuses one that skips a generation", async () => {
+    // The shape of a late renewal: the old term ran out on 1 January, the new
+    // one is dated from 1 February, and the operator installs it in between.
+    const term = (id: string, ...args: string[]) =>
+      cli(["issue", "--key", keys.private, "--id", id, "--licensee", "Acme Ltd", ...args]);
+
+    const old = (await term("lic_cli_2026", "--expires-at", "2030-01-01T00:00:00Z")).stdout.trim();
+    const renewal = (
+      await term("lic_cli_2027", "--renews", "lic_cli_2026",
+        "--not-before", "2030-02-01T00:00:00Z", "--expires-at", "2031-01-01T00:00:00Z")
+    ).stdout.trim();
+
+    const inBetween = [
+      "verify", "--key", keys.public, "--token", renewal,
+      "--now", "2030-01-02T00:00:00Z", "--grace", String(7 * 86_400),
+    ];
+
+    const carried = await cli([...inBetween, "--previous", old]);
+    expect(carried.code).toBe(0);
+    expect(carried.stdout).toContain("expired_in_grace: Acme Ltd (lic_cli_2027)");
+
+    // Without the license it replaces there is no window to inherit, so the
+    // renewal is simply a term that has not started.
+    const alone = await cli(inBetween);
+    expect(alone.code).toBe(1);
+    expect(alone.stderr).toContain("not_yet_valid");
+
+    const skipping = (
+      await term("lic_cli_2028", "--renews", "lic_cli_2027", "--expires-at", "2031-01-01T00:00:00Z")
+    ).stdout.trim();
+    const wrongChain = await cli([
+      "verify", "--key", keys.public, "--token", skipping,
+      "--now", "2030-01-02T00:00:00Z", "--previous", old,
+    ]);
+    expect(wrongChain.code).toBe(1);
+    expect(wrongChain.stderr).toContain("renewal_gap");
+  });
+
   it("still exits 1 under --json — the machine-readable form reports the same verdict", async () => {
     const { code, stdout } = await cli(["verify", "--key", keys.public, "--token", "not-a-token", "--json"]);
     expect(code).toBe(1);
@@ -309,6 +347,8 @@ describe("usage errors exit 2, never 1", () => {
     ["both expiry flags", () => [...issueArgs(), "--expires-in", "1d", "--expires-at", "1800000000"], "mutually exclusive"],
     ["contradictory machine flags", () => [...issueArgs(), "--machine", "fp", "--this-machine"], "mutually exclusive"],
     ["two ways to supply a token", () => ["verify", "--key", keys.public, "--token", "t", "--token-file", "f"], "mutually exclusive"],
+    ["two ways to supply the previous license", () => ["verify", "--key", keys.public, "--token", "t", "--previous", "p", "--previous-file", "f"], "mutually exclusive"],
+    ["a previous license this key did not sign", () => ["verify", "--key", keys.public, "--token", "t", "--previous", "not-a-token"], "--previous: not a license"],
     ["an unnamed key among several", () => ["verify", "--key", keys.public, "--key", `new=${keys.public}`, "--token", "t"], "<kid>=<file>"],
     ["a request naming no machine", () => ["request"], "--this-machine or --machine"],
     ["a request that is not a request", () => fulfilArgs("not-a-request"), "--request: expected an act1."],

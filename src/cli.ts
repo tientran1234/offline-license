@@ -10,7 +10,7 @@ import {
   type MachineClaim,
 } from "./activation.js";
 import type { FeatureValue, Features, LicenseClaims } from "./claims.js";
-import type { VerifyOptions } from "./core.js";
+import type { Predecessor, VerifyOptions } from "./core.js";
 import { issue } from "./issue.js";
 import { generateKeyPair, type PublicKeyInput } from "./keys.js";
 import { bindMachine, defaultFingerprint } from "./machine.js";
@@ -69,6 +69,9 @@ Run \`offline-license <command> --help\` for one command's options.
   --not-before <t>    Unix seconds or an ISO 8601 date.
   --kid <name>        Name the signing key, so a verifier holding several
                       knows which one to check against.
+  --renews <id>       Issue this as the renewal of that license, so an install
+                      holding it accepts this one and one holding an earlier
+                      generation does not.
   --machine <fp>      Bind to the machine with this fingerprint.
   --this-machine      Bind to this machine's defaultFingerprint().
   --now <t>           Override issuedAt. For reproducible tokens.
@@ -87,6 +90,11 @@ Run \`offline-license <command> --help\` for one command's options.
   --grace <seconds>   Keep accepting the license this long past expiresAt,
                       printing expired_in_grace and still exiting 0, so a
                       product can warn about a late renewal. Default: 0.
+  --previous <token>  The license being replaced, when what is offered is a
+                      renewal. One naming a different license is rejected as
+                      renewal_gap, and one whose term has not begun is accepted
+                      while this license is inside --grace.
+  --previous-file <f> Read that token from a file.
   --now <t>           Unix seconds or an ISO 8601 date. Overrides the clock.
   --json              Print the whole VerifyResult. The exit code is unchanged.
 
@@ -118,8 +126,8 @@ fingerprint, a nonce, and the key it is signed with.
   --id <id>           Unique license id. Also keys the machine binding.
   --licensee <name>   Defaults to the licensee the request names.
 
-Everything \`issue\` accepts for features, limits, metadata, expiry and --kid
-works here too. The machine binding is not among them: it comes from the
+Everything \`issue\` accepts for features, limits, metadata, expiry, --kid and
+--renews works here too. The machine binding is not among them: it comes from the
 request, which is the point of asking.
 
 A request that does not hold together exits 2 — it is input an operator can
@@ -210,6 +218,7 @@ const CLAIM_OPTIONS = {
   "expires-at": { type: "string" },
   "not-before": { type: "string" },
   kid: { type: "string" },
+  renews: { type: "string" },
   now: { type: "string" },
   out: { type: "string" },
   help: { type: "boolean", short: "h" },
@@ -225,6 +234,7 @@ interface ClaimValues {
   "expires-at"?: string | undefined;
   "not-before"?: string | undefined;
   kid?: string | undefined;
+  renews?: string | undefined;
   now?: string | undefined;
 }
 
@@ -256,6 +266,7 @@ function claimsFrom(values: ClaimValues, licensee: string): LicenseClaims {
   }
 
   if (values.kid !== undefined) claims.kid = values.kid;
+  if (values.renews !== undefined) claims.renews = values.renews;
   return claims;
 }
 
@@ -386,6 +397,8 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
       "this-machine": { type: "boolean" },
       skew: { type: "string" },
       grace: { type: "string" },
+      previous: { type: "string" },
+      "previous-file": { type: "string" },
       now: { type: "string" },
       json: { type: "boolean" },
       help: { type: "boolean", short: "h" },
@@ -408,6 +421,8 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
   if (values.grace !== undefined) options.graceSeconds = asNumber(values.grace, "--grace");
   const fingerprint = machineFingerprint(values.machine, values["this-machine"]);
   if (fingerprint !== undefined) options.machineFingerprint = fingerprint;
+  const previous = await readPrevious(values.previous, values["previous-file"]);
+  if (previous !== undefined) options.previous = predecessor(publicKey, previous.trim(), options);
 
   let result;
   try {
@@ -429,6 +444,35 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
     io.err(`invalid: ${result.reason}${which}\n`);
   }
   return result.ok ? OK : REJECTED;
+}
+
+/**
+ * The token of the license being replaced. Stdin is not one of the places it
+ * can come from: that is where the token under test arrives, and a command
+ * reading two blobs from one pipe would have to split them somewhere.
+ */
+async function readPrevious(inline: string | undefined, file: string | undefined): Promise<string | undefined> {
+  if (inline !== undefined && file !== undefined) {
+    throw new UsageError("--previous and --previous-file are mutually exclusive");
+  }
+  if (inline !== undefined) return inline;
+  return file === undefined ? undefined : readText(file, "--previous-file");
+}
+
+/**
+ * The predecessor, read out of its own token under the same key.
+ *
+ * The id and the expiry a renewal is judged against are claims, and an unsigned
+ * claim decides nothing — a predecessor whose expiry anyone could edit would
+ * hand out an unbounded grace window. Being expired is what a predecessor
+ * normally is, so only a token that yields no claims at all is bad input.
+ */
+function predecessor(publicKey: PublicKeyInput, token: string, options: VerifyOptions): Predecessor {
+  const result = verify(publicKey, token, options);
+  if (result.claims === undefined) {
+    throw new UsageError("--previous: not a license signed by this key");
+  }
+  return result.claims;
 }
 
 const describe = (claims: LicenseClaims) => `${claims.licensee} (${claims.id})`;

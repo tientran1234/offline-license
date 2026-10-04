@@ -7,6 +7,7 @@ import {
   type LicenseClaims,
 } from "./claims.js";
 import {
+  checkRenewal,
   checkTime,
   LicenseError,
   TOKEN_PREFIX,
@@ -107,7 +108,8 @@ export async function bindMachine(licenseId: string, fingerprint: string): Promi
 /**
  * Check a token. Same checks in the same order as the Node build: signature
  * before anything else, so nothing below ever reasons about claims an attacker
- * wrote. Choosing the key by `kid` is not one of the checks — see selectKeys.
+ * wrote, and the renewal chain before the clock. Choosing the key by `kid` is
+ * not one of the checks — see selectKeys.
  */
 export async function verify(
   publicKey: WebPublicKeyInput,
@@ -141,11 +143,21 @@ export async function verify(
     throw err;
   }
 
+  const now = options.now?.() ?? Math.floor(Date.now() / 1000);
+  const renewal = checkRenewal(claims, {
+    previous: options.previous,
+    now,
+    skewSeconds: options.skewSeconds,
+    graceSeconds: options.graceSeconds,
+  });
+  if (!renewal.ok) return { ok: false, reason: renewal.reason, claims };
+
   const timing = checkTime(claims, {
-    now: options.now?.() ?? Math.floor(Date.now() / 1000),
+    now,
     clock: options.clock,
     skewSeconds: options.skewSeconds,
     graceSeconds: options.graceSeconds,
+    inheritsGrace: renewal.inheritsGrace,
   });
   if (!timing.ok) return { ok: false, reason: timing.reason, claims };
 

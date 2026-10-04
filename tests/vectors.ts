@@ -47,6 +47,12 @@ const activationRequest = createActivationRequest({
 });
 const activated = claims({ machine: bindMachine(claims().id, FINGERPRINT), activation: ACTIVATION_NONCE });
 
+/** The license an install is holding when a renewal arrives: expired yesterday. */
+const PREVIOUS = { id: "lic_vector_0", expiresAt: NOW - DAY };
+const renewed = claims({ renews: PREVIOUS.id });
+const laterTerm = claims({ renews: PREVIOUS.id, notBefore: NOW + 30 * DAY, expiresAt: NOW + 395 * DAY });
+const skipping = claims({ renews: "lic_vector_skipped" });
+
 /** Signed by the real key, but the payload is not a license. */
 function signedNonsense(): string {
   const payload = Buffer.from(JSON.stringify({ id: "x" })).toString("base64url");
@@ -187,6 +193,34 @@ export const vectors: readonly Vector[] = [
     token: fulfilActivation(keys.privateKey, activationRequest, claims()),
     options: { now: at(NOW), machineFingerprint: OTHER_FINGERPRINT },
     expected: { ok: false, reason: "machine_mismatch", claims: activated },
+  },
+  {
+    name: "a renewal of the license the box is holding",
+    publicKey: keys.publicKey,
+    token: issue(keys.privateKey, renewed),
+    options: { now: at(NOW), previous: PREVIOUS },
+    expected: { ok: true, claims: renewed },
+  },
+  {
+    name: "a renewal that skips a generation",
+    publicKey: keys.publicKey,
+    token: issue(keys.privateKey, skipping),
+    options: { now: at(NOW), previous: PREVIOUS },
+    expected: { ok: false, reason: "renewal_gap", claims: skipping },
+  },
+  {
+    name: "a renewal dated from the next term, while the one it replaces is in grace",
+    publicKey: keys.publicKey,
+    token: issue(keys.privateKey, laterTerm),
+    options: { now: at(NOW), graceSeconds: 7 * DAY, previous: PREVIOUS },
+    expected: { ok: true, claims: laterTerm, status: "expired_in_grace" },
+  },
+  {
+    name: "the same renewal once that grace has run out",
+    publicKey: keys.publicKey,
+    token: issue(keys.privateKey, laterTerm),
+    options: { now: at(NOW + 8 * DAY), graceSeconds: 7 * DAY, previous: PREVIOUS },
+    expected: { ok: false, reason: "not_yet_valid", claims: laterTerm },
   },
   {
     name: "a ring, and a kid naming the key that signed",
