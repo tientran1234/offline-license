@@ -395,6 +395,89 @@ out of it under the same key. Those two claims decide how long the inherited
 window runs, and an expiry anyone could edit with a text editor would be no
 window at all.
 
+## Check audit
+
+The product knows why it stopped letting people in; its admin page does not.
+`onCheck` is told the verdict of every check the guard makes, and `CheckLog` is
+the listener that keeps the little of it a screen can use: when the license last
+verified, and what went wrong the last few times it did not.
+
+```ts
+import { CheckLog, FileCheckLogStore, LicenseGuard } from "offline-license";
+
+const log = new CheckLog({ store: new FileCheckLogStore("/var/lib/acme/checks.json") });
+await log.load();                // once, at startup
+
+const license = new LicenseGuard({ publicKey, token, onCheck: log.record });
+license.hasFeature("sso");       // every check reports, here and everywhere else
+
+log.lastVerifiedAt;              // 1800003600 — the whole of "last verified at"
+log.lastOk;                      // { at: 1800003600, license: "lic_7f3a" }
+log.failures;                    // the last runs, oldest first
+```
+
+`record` is a property rather than a method, so it can be handed over as it is
+and still find its `this`.
+
+**Successes are one timestamp, not a list.** The guard re-verifies on every
+question, so a product asking three of them per render produces successes faster
+than any small log could hold, and a ring filled with them would push out the
+failures the page exists to show. "When did this last work" has one answer
+anyway.
+
+**Failures collapse into runs** for that same reason: an expired license fails
+again on every render, and what the page needs is the kinds of failure rather
+than the last half-second of one of them. A run carries the reason, when it
+started, when it last happened, and how many checks it covers — checks and not
+questions, because one `withinLimit()` can verify twice.
+
+```json
+{
+  "version": 1,
+  "lastOk": {"at":1800003600,"license":"lic_7f3a"},
+  "failures": [
+    {"reason":"machine_mismatch","firstAt":1800000000,"at":1800002400,"count":418,"license":"lic_7f3a"}
+  ]
+}
+```
+
+A run is written the moment it starts. Failures are rare, a crash is exactly
+when someone goes looking for this page, and a failure nobody wrote down cannot
+be reconstructed afterwards. A repeat, or a success, rides a throttle (default:
+60 seconds), because a write per question would put the log on the render path —
+with the first check after startup always persisted, or a product that is
+started and stopped again would never record that it verified at all.
+
+`load()` has to resolve before the log is read, the way the clock's and the
+ledger's do: reading it earlier throws rather than saying "never verified" about
+an install that has been verifying for a year. Recording is never refused,
+though. The guard holds the listener from its constructor and may answer a
+question while the file is still being read, so `load()` merges what it finds
+underneath what has already happened instead of replacing it.
+
+**The log is not evidence.** It sits on the customer's disk under no signature,
+and chaining it the way the usage ledger is chained would claim a guarantee it
+cannot have: a usage count decides what the product allows, while nothing is
+ever decided from this file. That is also why a log this release cannot read
+whole — a later version, a stray field, a write cut short — is discarded rather
+than refused. An unreadable history costs an admin page its history; refusing
+would cost a paying customer their product. Whatever a listener throws is
+swallowed for the same reason, so a log on a full disk cannot turn a valid
+license into an exception.
+
+The browser build has the same log over `LocalStorageCheckLogStore`, under
+`offline-license:checks`:
+
+```ts
+import { CheckLog, LocalStorageCheckLogStore } from "offline-license/web";
+
+const log = new CheckLog({ store: new LocalStorageCheckLogStore() });
+```
+
+There is no CLI surface for it. A log is a history and `verify` exits, which is
+the same reason clock-rollback detection belongs to a long-lived product rather
+than to a command.
+
 ## CLI
 
 The same operations from a shell, on `node:util` `parseArgs` — still no
@@ -625,6 +708,6 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 252 tests: round-trip, tampering, time, grace, renewals, binding, clock, guard, features, metered limits, offline activation, rotation, CLI, license files, the web build
+pnpm test                     # 278 tests: round-trip, tampering, time, grace, renewals, binding, clock, guard, features, metered limits, offline activation, check audit, rotation, CLI, license files, the web build
 pnpm build                    # ESM + .d.ts into dist/
 ```
