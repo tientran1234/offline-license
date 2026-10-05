@@ -38,3 +38,14 @@ export { FileLedgerStore, MemoryLedgerStore } from "./stores.js";
 
 export { LicenseGuard } from "./guard.js";
 export type { LicenseGuardOptions } from "./guard.js";
+
+export { CheckLog, CHECK_LOG_VERSION } from "./audit.js";
+export type {
+  CheckFailure,
+  CheckListener,
+  CheckLogOptions,
+  CheckLogState,
+  CheckLogStore,
+  CheckSuccess,
+} from "./audit.js";
+export { FileCheckLogStore, MemoryCheckLogStore } from "./stores.js";

@@ -13,15 +13,23 @@ import type { MonotonicClock } from "./clock.js";
 /** Token version prefix. Part of the signed bytes, so it cannot be swapped. */
 export const TOKEN_PREFIX = "lic1";
 
-export type VerifyFailure =
-  | "malformed"
-  | "invalid_signature"
-  | "invalid_claims"
-  | "not_yet_valid"
-  | "expired"
-  | "machine_mismatch"
-  | "clock_rollback"
-  | "renewal_gap";
+/**
+ * The failure vocabulary, as a list so that it also exists at runtime: the
+ * check log reads reasons back out of a stored file and has to know which ones
+ * this release understands. Two spellings of the same vocabulary would drift.
+ */
+export const VERIFY_FAILURES = [
+  "malformed",
+  "invalid_signature",
+  "invalid_claims",
+  "not_yet_valid",
+  "expired",
+  "machine_mismatch",
+  "clock_rollback",
+  "renewal_gap",
+] as const;
+
+export type VerifyFailure = (typeof VERIFY_FAILURES)[number];
 
 export type VerifyResult =
   /** `status` is present only when the license is inside its grace window. */

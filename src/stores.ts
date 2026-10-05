@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 
+import type { CheckLogStore } from "./audit.js";
 import type { LedgerStore } from "./ledger.js";
 
 /** Where the monotonic clock keeps its high-water mark between runs. */
@@ -67,6 +68,43 @@ export class MemoryLedgerStore implements LedgerStore {
  * previous ledger, never a fragment of the new one.
  */
 export class FileLedgerStore implements LedgerStore {
+  constructor(private readonly path: string) {}
+
+  async read(): Promise<string | null> {
+    try {
+      return await readFile(this.path, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
+    }
+  }
+
+  async write(text: string): Promise<void> {
+    await writeAtomic(this.path, text);
+  }
+}
+
+/** For tests and processes whose history is not meant to outlive them. */
+export class MemoryCheckLogStore implements CheckLogStore {
+  private text: string | null = null;
+  async read() {
+    return this.text;
+  }
+  async write(text: string) {
+    this.text = text;
+  }
+}
+
+/**
+ * A check log in one file, replaced atomically by the same temp-then-rename as
+ * the clock's mark and the ledger's entries.
+ *
+ * The atomicity buys less here, because a torn log is discarded rather than
+ * read as tampering — but discarding is the whole loss. A write interrupted at
+ * the wrong moment would leave the admin page with no history at all, on the
+ * install whose history someone has just gone looking for.
+ */
+export class FileCheckLogStore implements CheckLogStore {
   constructor(private readonly path: string) {}
 
   async read(): Promise<string | null> {

@@ -1,3 +1,4 @@
+import type { CheckLogStore } from "./audit.js";
 import type { LedgerStore } from "./ledger.js";
 import type { ClockStore } from "./stores.js";
 
@@ -16,6 +17,9 @@ export const CLOCK_STORAGE_KEY = "offline-license:clock";
 
 /** Where a usage ledger sits, under the same namespace. */
 export const USAGE_STORAGE_KEY = "offline-license:usage";
+
+/** Where the check log sits, under the same namespace again. */
+export const CHECK_LOG_STORAGE_KEY = "offline-license:checks";
 
 export interface LocalStorageStoreOptions {
   /** Default: `CLOCK_STORAGE_KEY`. */
@@ -89,6 +93,42 @@ export class LocalStorageLedgerStore implements LedgerStore {
 
   constructor(options: LocalStorageLedgerStoreOptions = {}) {
     this.key = options.key ?? USAGE_STORAGE_KEY;
+    this.storage = options.storage;
+  }
+
+  async read(): Promise<string | null> {
+    return resolveStorage(this.storage).getItem(this.key);
+  }
+
+  async write(text: string): Promise<void> {
+    resolveStorage(this.storage).setItem(this.key, text);
+  }
+}
+
+export interface LocalStorageCheckLogStoreOptions {
+  /** Default: `CHECK_LOG_STORAGE_KEY`. Give a second license its own. */
+  key?: string;
+  /** Default: `globalThis.localStorage`. */
+  storage?: WebStorage;
+}
+
+/**
+ * The browser counterpart to `FileCheckLogStore`: the log as one string under
+ * one key.
+ *
+ * A write replaces what is there, with neither the clock store's refusal to go
+ * backwards nor the ledger's re-read before an append. Neither is available: a
+ * log is not one number to compare, and a `CheckLog` holds the history it is
+ * going to write in memory so that recording a check costs a product nothing.
+ * Two tabs therefore keep two histories and the last one to flush wins, which
+ * is a display losing some entries rather than a check losing its answer.
+ */
+export class LocalStorageCheckLogStore implements CheckLogStore {
+  private readonly key: string;
+  private readonly storage: WebStorage | undefined;
+
+  constructor(options: LocalStorageCheckLogStoreOptions = {}) {
+    this.key = options.key ?? CHECK_LOG_STORAGE_KEY;
     this.storage = options.storage;
   }
 

@@ -37,12 +37,29 @@ export type { FeatureValue, Features, LicenseClaims } from "./claims.js";
 export { MonotonicClock } from "./clock.js";
 export type { ClockObservation, MonotonicClockOptions } from "./clock.js";
 export type { ClockStore } from "./stores.js";
-export { CLOCK_STORAGE_KEY, LocalStorageStore, LocalStorageLedgerStore, USAGE_STORAGE_KEY } from "./localstorage.js";
+export {
+  CHECK_LOG_STORAGE_KEY,
+  CLOCK_STORAGE_KEY,
+  LocalStorageCheckLogStore,
+  LocalStorageStore,
+  LocalStorageLedgerStore,
+  USAGE_STORAGE_KEY,
+} from "./localstorage.js";
 export type {
+  LocalStorageCheckLogStoreOptions,
   LocalStorageLedgerStoreOptions,
   LocalStorageStoreOptions,
   WebStorage,
 } from "./localstorage.js";
+export { CheckLog, CHECK_LOG_VERSION } from "./audit.js";
+export type {
+  CheckFailure,
+  CheckListener,
+  CheckLogOptions,
+  CheckLogState,
+  CheckLogStore,
+  CheckSuccess,
+} from "./audit.js";
 export { parseLedger, serializeLedger, UsageLedgerError, UsageLimitError, USAGE_LEDGER_VERSION } from "./ledger.js";
 export type { Ledger, LedgerStore, UsageEntry } from "./ledger.js";
 

@@ -50,6 +50,7 @@ describe("the browser build stands alone", () => {
     // browser only finds out at runtime — so walk the graph here instead.
     const reached = await runtimeImports("web.ts");
     expect([...reached].sort()).toEqual([
+      "audit.ts",
       "claims.ts",
       "clock.ts",
       "core.ts",
