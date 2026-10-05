@@ -1,3 +1,4 @@
+import { reportCheck, type CheckListener } from "./audit.js";
 import { featureValue, hasFeature, type FeatureValue, type LicenseClaims } from "./claims.js";
 import type { PublicKeyInput } from "./keys.js";
 import { LicenseError, type VerifyOptions, type VerifyResult } from "./core.js";
@@ -6,6 +7,12 @@ import { verify } from "./verify.js";
 export interface LicenseGuardOptions extends VerifyOptions {
   publicKey: PublicKeyInput;
   token: string;
+  /**
+   * Told the verdict of every check this guard makes — `CheckLog.record` is
+   * what most products hand over, so an admin page can say when the license
+   * last verified and what went wrong before that.
+   */
+  onCheck?: CheckListener;
 }
 
 /**
@@ -14,13 +21,21 @@ export interface LicenseGuardOptions extends VerifyOptions {
  * Every question re-verifies the token. Verification is a signature check and
  * a few comparisons — cheap enough that caching would only add a way for a
  * stale answer to outlive an expiry or a clock rollback.
+ *
+ * Which is also why `onCheck` fires more often than a product asks questions:
+ * it reports verifications, not questions, and one question may be more than
+ * one verification. `CheckLog` is built for that.
  */
 export class LicenseGuard {
   constructor(private readonly options: LicenseGuardOptions) {}
 
   check(): VerifyResult {
-    const { publicKey, token, ...rest } = this.options;
-    return verify(publicKey, token, rest);
+    const { publicKey, token, onCheck, ...rest } = this.options;
+    const result = verify(publicKey, token, rest);
+    // After the verdict, and unable to change it: an observer watches a check,
+    // it does not take part in one. See reportCheck.
+    reportCheck(onCheck, result);
+    return result;
   }
 
   /** Claims if the license is currently valid, else null. */

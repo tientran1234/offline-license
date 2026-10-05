@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { issue, LicenseError, LicenseGuard } from "../src/index.js";
+import { CheckLog, issue, LicenseError, LicenseGuard, MemoryCheckLogStore, type VerifyResult } from "../src/index.js";
 import { at, claims, keys, NOW } from "./helpers.js";
 
 const guard = (over = {}, now = NOW) =>
@@ -67,6 +67,73 @@ describe("LicenseGuard", () => {
     expect(g.hasFeature("sso")).toBe(true); // warn, do not block
     expect(g.withinLimit("seats", 9)).toBe(true);
     expect(guard().inGrace()).toBe(false);
+  });
+
+  it("reports every verdict it reaches to onCheck", () => {
+    const seen: VerifyResult[] = [];
+    const g = new LicenseGuard({
+      publicKey: keys.publicKey,
+      token: issue(keys.privateKey, claims()),
+      now: at(NOW),
+      onCheck: (result) => seen.push(result),
+    });
+    g.hasFeature("sso");
+    g.assertFeature("sso");
+    expect(seen).toEqual([
+      { ok: true, claims: claims() },
+      { ok: true, claims: claims() },
+    ]);
+
+    const rejected = new LicenseGuard({
+      publicKey: keys.publicKey,
+      token: issue(keys.privateKey, claims()),
+      now: at(NOW + 40 * 86_400),
+      onCheck: (result) => seen.push(result),
+    });
+    expect(rejected.hasFeature("sso")).toBe(false);
+    expect(seen.at(-1)).toEqual({ ok: false, reason: "expired", claims: claims() });
+  });
+
+  it("cannot be made to reject a valid license by a listener that throws", () => {
+    // An observer watches the check; it does not take part in it. A log whose
+    // disk has filled up must not be able to lock a paying customer out.
+    const g = new LicenseGuard({
+      publicKey: keys.publicKey,
+      token: issue(keys.privateKey, claims()),
+      now: at(NOW),
+      onCheck: () => {
+        throw new Error("the admin log is on a full disk");
+      },
+    });
+    expect(g.hasFeature("sso")).toBe(true);
+    expect(g.check()).toEqual({ ok: true, claims: claims() });
+  });
+
+  it("fills a CheckLog an admin page can read", async () => {
+    const store = new MemoryCheckLogStore();
+    const log = new CheckLog({ store, now: at(NOW) });
+    await log.load();
+    new LicenseGuard({
+      publicKey: keys.publicKey,
+      token: issue(keys.privateKey, claims()),
+      now: at(NOW),
+      onCheck: log.record, // a property, so it needs no wrapper to keep its `this`
+    }).hasFeature("sso");
+    expect(log.lastVerifiedAt).toBe(NOW);
+    expect(log.failures).toEqual([]);
+
+    const machineBound = new LicenseGuard({
+      publicKey: keys.publicKey,
+      token: issue(keys.privateKey, claims({ machine: "not-this-box" })),
+      now: at(NOW),
+      onCheck: log.record,
+    });
+    machineBound.hasFeature("sso");
+    machineBound.hasFeature("export");
+    expect(log.failures).toEqual([
+      { reason: "machine_mismatch", firstAt: NOW, at: NOW, count: 2, license: "lic_test_1" },
+    ]);
+    expect(log.lastVerifiedAt).toBe(NOW); // still what it was: a failure is not a verification
   });
 
   it("throws LicenseError instances, not plain errors", () => {

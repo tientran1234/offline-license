@@ -11,7 +11,10 @@ import {
 } from "../src/index.js";
 import {
   bindMachine as webBindMachine,
+  CheckLog,
+  CHECK_LOG_STORAGE_KEY,
   CLOCK_STORAGE_KEY,
+  LocalStorageCheckLogStore,
   importPublicKey,
   LicenseGuard,
   LocalStorageLedgerStore,
@@ -285,6 +288,52 @@ describe("the browser usage ledger", () => {
     const ledger = usage(new LocalStorageLedgerStore());
     await withAmbientStorage(undefined, async () => {
       await expect(ledger.load()).rejects.toThrow(/localStorage is unavailable/);
+    });
+  });
+});
+
+describe("the browser check log", () => {
+  it("records what a dashboard's own checks did, and keeps it under the key it documents", async () => {
+    const storage = new FakeStorage();
+    const log = new CheckLog({ store: new LocalStorageCheckLogStore({ storage }), now: at(NOW) });
+    await log.load();
+    const license = (over: Parameters<typeof claims>[0] = {}) =>
+      new LicenseGuard({
+        publicKey: keys.publicKey,
+        token: issue(keys.privateKey, claims(over)),
+        now: at(NOW),
+        onCheck: log.record,
+      });
+
+    await license().hasFeature("sso");
+    await license({ expiresAt: NOW - 86_400 }).hasFeature("sso");
+    await license({ expiresAt: NOW - 86_400 }).hasFeature("export");
+    await log.flush();
+
+    expect(log.lastVerifiedAt).toBe(NOW);
+    expect(log.failures).toEqual([{ reason: "expired", firstAt: NOW, at: NOW, count: 2, license: "lic_test_1" }]);
+    expect(storage.items.get(CHECK_LOG_STORAGE_KEY)).toContain('"reason":"expired"');
+
+    const reloaded = new CheckLog({ store: new LocalStorageCheckLogStore({ storage }), now: at(NOW) });
+    await reloaded.load();
+    expect(reloaded.failures).toEqual(log.failures);
+  });
+
+  it("keeps a page from going dark because its history cannot be written", async () => {
+    // The log is a display. A browser that has withheld storage is a page that
+    // cannot show what happened, not a license that stopped being valid.
+    const log = new CheckLog({ store: new LocalStorageCheckLogStore(), now: at(NOW) });
+    await withAmbientStorage(undefined, async () => {
+      await expect(log.load()).rejects.toThrow(/localStorage is unavailable/);
+    });
+    const license = new LicenseGuard({
+      publicKey: keys.publicKey,
+      token: issue(keys.privateKey, claims()),
+      now: at(NOW),
+      onCheck: log.record,
+    });
+    await withAmbientStorage(undefined, async () => {
+      expect(await license.hasFeature("sso")).toBe(true);
     });
   });
 });

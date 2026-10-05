@@ -1,3 +1,4 @@
+import { reportCheck, type CheckListener } from "./audit.js";
 import {
   assertClaims,
   ClaimsError,
@@ -202,6 +203,12 @@ export async function verifyOrThrow(
 export interface LicenseGuardOptions extends VerifyOptions {
   publicKey: WebPublicKeyInput;
   token: string;
+  /**
+   * Told the verdict of every check this guard makes — `CheckLog.record` is
+   * what most dashboards hand over. It is called with the verdict and cannot
+   * change it, so it stays synchronous in a build where everything else is not.
+   */
+  onCheck?: CheckListener;
 }
 
 /**
@@ -213,9 +220,11 @@ export interface LicenseGuardOptions extends VerifyOptions {
 export class LicenseGuard {
   constructor(private readonly options: LicenseGuardOptions) {}
 
-  check(): Promise<VerifyResult> {
-    const { publicKey, token, ...rest } = this.options;
-    return verify(publicKey, token, rest);
+  async check(): Promise<VerifyResult> {
+    const { publicKey, token, onCheck, ...rest } = this.options;
+    const result = await verify(publicKey, token, rest);
+    reportCheck(onCheck, result);
+    return result;
   }
 
   /** Claims if the license is currently valid, else null. */
