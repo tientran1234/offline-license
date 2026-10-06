@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-06
+
+- Shared test vectors: a `vectors/` fixture set (keys, tokens, expected results) run by both the Node and the web build, published so third-party implementations can prove compatibility, so the table the two builds agree on is bytes on disk a verifier in another language can check itself against rather than tokens that lived for a few milliseconds inside one test process.
+
 ## 2026-10-05
 
 - Check audit: `LicenseGuard({ onCheck })` plus a small rotating log store (file and localStorage) so a self-hosted install can show "last verified at" and the last failures on its admin page, instead of leaving an operator to guess why the product stopped letting people in.

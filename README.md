@@ -610,8 +610,8 @@ Everything returns a promise, because `subtle.verify` does and there is no
 synchronous way to reach it. That is the whole of the difference: the same
 checks in the same order, the same reasons, the same `LicenseError`, key rings
 and `kid` selection included. Both builds run one table of tokens and expected
-verdicts (`tests/vectors.ts`), so a verdict that moves on one platform and not
-the other fails the suite rather than a customer's screen.
+verdicts — the one in `vectors/`, below — so a verdict that moves on one
+platform and not the other fails the suite rather than a customer's screen.
 
 `verify` takes an SPKI PEM or a `CryptoKey` you imported yourself with
 `importPublicKey`. There is no cache behind the PEM — the guard re-verifies on
@@ -657,6 +657,42 @@ site data blocked, or Safari's private mode — throws rather than quietly doing
 nothing, because a product that believes the check is on when it is not is worse
 off than one that is told. Pass `storage` (`sessionStorage`, or your own object)
 when `localStorage` is not where the mark belongs.
+
+## Test vectors
+
+`vectors/` holds twenty-five tokens, the keys that signed them, and the verdict
+each must produce. It ships in the package.
+
+```
+vectors/keys.json      two Ed25519 key pairs: SPKI PEM, the raw 32 bytes, PKCS#8 PEM
+vectors/vectors.json   name, public key, token, verify options, expected result
+vectors/README.md      how to run the set, and what is deliberately not in it
+```
+
+It is published because a licensing format with one implementation is a format
+with no interoperability story. A verifier in Go or Rust can take these files
+and prove it agrees with this one — including the parts that are easy to get
+subtly wrong, like a `kid` naming a retired key yielding no candidate instead of
+falling back to the ring, or claims coming back alongside an `expired` verdict
+but not alongside `invalid_signature`. Every failure reason a token can produce
+has a vector; a test fails if one is added without one.
+
+The set is also how the two builds here are held together, which is why it is
+files and not a table built at import time. Tokens that existed for a few
+milliseconds inside one test process proved the builds agreed with each other
+and nothing else: a change to the issuer moved the fixtures and the
+expectations in step, and nobody outside the repository had anything to check.
+These are bytes, signed by keys that are also bytes.
+
+```bash
+pnpm vectors    # re-cut the set after a change to the issuer
+```
+
+Payloads are canonical JSON and Ed25519 is deterministic, so an unchanged
+release re-cuts byte-for-byte; `pnpm test` compares the checked-in file against
+what the current code signs and fails on a diff. The private keys are in there
+on purpose — an implementation that issues can reproduce every token exactly —
+and they are test keys that sign nothing real.
 
 ## Design decisions
 
@@ -708,6 +744,7 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 278 tests: round-trip, tampering, time, grace, renewals, binding, clock, guard, features, metered limits, offline activation, check audit, rotation, CLI, license files, the web build
+pnpm test                     # 284 tests: round-trip, tampering, time, grace, renewals, binding, clock, guard, features, metered limits, offline activation, check audit, rotation, CLI, license files, the web build, the published vectors
 pnpm build                    # ESM + .d.ts into dist/
+pnpm vectors                  # re-cut vectors/ after a change to the issuer
 ```
