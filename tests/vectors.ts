@@ -1,22 +1,91 @@
-import { createPrivateKey, sign } from "node:crypto";
-import {
-  bindMachine,
-  createActivationRequest,
-  fulfilActivation,
-  issue,
-  type VerifyOptions,
-  type VerifyResult,
-} from "../src/index.js";
-import { at, claims, keys, otherKeys, NOW } from "./helpers.js";
+import { readFileSync } from "node:fs";
+import type { Predecessor, VerifyOptions, VerifyResult } from "../src/index.js";
 
 /**
- * One table of tokens and the verdict each must produce.
+ * The vectors in `vectors/`, loaded.
  *
- * The Node build and the browser build are separate implementations over
- * different crypto APIs, so "they agree" is not something the type system can
- * say. Both run this table instead: a verdict that changes on one platform and
- * not the other fails here, whichever platform moved.
+ * One table of tokens and the verdict each must produce. The Node build and the
+ * browser build are separate implementations over different crypto APIs, so
+ * "they agree" is not something the type system can say; both run this table
+ * instead, and a verdict that changes on one platform and not the other fails
+ * here, whichever platform moved.
+ *
+ * The table used to be built in TypeScript at import time, over keys generated
+ * per run. That proved the two builds agreed with each other and nothing more:
+ * the tokens existed for a few milliseconds inside one test process, so an
+ * implementation in another language had nothing to check itself against, and a
+ * change to `issue` moved the fixtures and the expectations together. Now the
+ * tokens are bytes on disk, signed by keys that are also on disk, shipped in
+ * the package — see vectors/README.md. This module only reads them.
  */
+
+/** Where the fixtures live. Published, so the paths are part of the contract. */
+export const vectorsDir = new URL("../vectors/", import.meta.url);
+
+export function readFixture(name: string): string {
+  return readFileSync(new URL(name, vectorsDir), "utf8");
+}
+
+/** One entry of `vectors/keys.json`. */
+export interface VectorKeyPair {
+  /** SPKI PEM, as a verifier takes it. */
+  publicKey: string;
+  /**
+   * The 32 raw Ed25519 bytes, base64url.
+   *
+   * The same key as `publicKey`, for the implementations whose crypto library
+   * wants the key and not a certificate wrapper around it. Parsing SPKI DER to
+   * find a 32-byte tail is work this file can do once.
+   */
+  publicKeyRaw: string;
+  /** PKCS#8 PEM. A test key — see the note in the file. */
+  privateKey: string;
+}
+
+export interface KeyFile {
+  version: number;
+  note: string;
+  keys: Readonly<Record<string, VectorKeyPair>>;
+}
+
+/** A key by the name `vectors/keys.json` gives it, or a ring of them by `kid`. */
+export type KeyRef = string | Readonly<Record<string, string>>;
+
+/** verify()'s options as JSON can carry them: `now` is a number, not a function. */
+export interface VectorOptions {
+  now: number;
+  skewSeconds?: number;
+  graceSeconds?: number;
+  machineFingerprint?: string;
+  previous?: Predecessor;
+}
+
+export interface VectorEntry {
+  name: string;
+  publicKey: KeyRef;
+  token: string;
+  options: VectorOptions;
+  expected: VerifyResult;
+}
+
+export interface VectorFile {
+  version: number;
+  /** The token prefix every vector here carries, so a reader can assert it. */
+  tokenPrefix: string;
+  /** The machine the bound vectors are issued for — bindMachine's input. */
+  fingerprint: string;
+  vectors: readonly VectorEntry[];
+}
+
+export const keyFile = JSON.parse(readFixture("keys.json")) as KeyFile;
+export const vectorFile = JSON.parse(readFixture("vectors.json")) as VectorFile;
+
+/** The fixture keys, by name. Both builds and the generator read these. */
+export const fixtureKeys = keyFile.keys;
+
+export const FINGERPRINT = vectorFile.fingerprint;
+
+/** A vector with the key names resolved and `now` made callable. */
 export interface Vector {
   name: string;
   /** A PEM public key, or a ring of them — both builds accept both. */
@@ -26,221 +95,41 @@ export interface Vector {
   expected: VerifyResult;
 }
 
-export const FINGERPRINT = "0f3c-vector-machine";
-const OTHER_FINGERPRINT = "9a11-someone-elses-box";
-
-const ring = { "2025": otherKeys.publicKey, "2026": keys.publicKey };
-
-const DAY = 86_400;
-const expiring = claims({ expiresAt: NOW - DAY });
-const bound = claims({ machine: bindMachine(claims().id, FINGERPRINT) });
-const future = claims({ notBefore: NOW + DAY, expiresAt: NOW + 30 * DAY });
-const rotated = claims({ kid: "2026" });
-const valued = claims({ features: { sso: true, seats: 25, tier: "pro", beta: false } });
-
-/** A real exchange, with the nonce pinned so the token is reproducible. */
-const ACTIVATION_NONCE = "mUoBrUO3tdZr2W7N";
-const activationRequest = createActivationRequest({
-  fingerprint: FINGERPRINT,
-  nonce: ACTIVATION_NONCE,
-  requestedAt: NOW - 3600,
-});
-const activated = claims({ machine: bindMachine(claims().id, FINGERPRINT), activation: ACTIVATION_NONCE });
-
-/** The license an install is holding when a renewal arrives: expired yesterday. */
-const PREVIOUS = { id: "lic_vector_0", expiresAt: NOW - DAY };
-const renewed = claims({ renews: PREVIOUS.id });
-const laterTerm = claims({ renews: PREVIOUS.id, notBefore: NOW + 30 * DAY, expiresAt: NOW + 395 * DAY });
-const skipping = claims({ renews: "lic_vector_skipped" });
-
-/** Signed by the real key, but the payload is not a license. */
-function signedNonsense(): string {
-  const payload = Buffer.from(JSON.stringify({ id: "x" })).toString("base64url");
-  const signature = sign(null, Buffer.from(`lic1.${payload}`), createPrivateKey(keys.privateKey));
-  return `lic1.${payload}.${signature.toString("base64url")}`;
+/**
+ * A fixture key by name.
+ *
+ * A ring naming a key the file does not hold would otherwise read as a retired
+ * key and pass the vector that expects exactly that, so a missing name is an
+ * error here rather than an undefined further down.
+ */
+export function fixtureKey(name: string): VectorKeyPair {
+  const pair = fixtureKeys[name];
+  if (pair === undefined) throw new Error(`vectors/keys.json holds no key named ${JSON.stringify(name)}`);
+  return pair;
 }
 
-function flipPayload(token: string): string {
-  const [prefix, payload, signature] = token.split(".") as [string, string, string];
-  return `${prefix}.${payload.slice(0, -1)}${payload.endsWith("A") ? "B" : "A"}.${signature}`;
+export const vectors: readonly Vector[] = vectorFile.vectors.map((entry) => ({
+  name: entry.name,
+  publicKey: resolveKey(entry.publicKey),
+  token: entry.token,
+  options: toVerifyOptions(entry.options),
+  expected: entry.expected,
+}));
+
+function resolveKey(ref: KeyRef): Vector["publicKey"] {
+  if (typeof ref === "string") return publicKey(ref);
+  return Object.fromEntries(Object.entries(ref).map(([kid, name]) => [kid, publicKey(name)]));
 }
 
-export const vectors: readonly Vector[] = [
-  {
-    name: "a current license",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, claims()),
-    options: { now: at(NOW) },
-    expected: { ok: true, claims: claims() },
-  },
-  {
-    name: "expired yesterday, inside a week of grace",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, expiring),
-    options: { now: at(NOW), graceSeconds: 7 * DAY },
-    expected: { ok: true, claims: expiring, status: "expired_in_grace" },
-  },
-  {
-    name: "expired yesterday, past a one-hour grace",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, expiring),
-    options: { now: at(NOW), graceSeconds: 3600 },
-    expected: { ok: false, reason: "expired", claims: expiring },
-  },
-  {
-    name: "expired yesterday, no grace asked for",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, expiring),
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "expired", claims: expiring },
-  },
-  {
-    name: "expired thirty seconds ago, inside the default skew",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, claims({ expiresAt: NOW - 30 })),
-    options: { now: at(NOW) },
-    expected: { ok: true, claims: claims({ expiresAt: NOW - 30 }) },
-  },
-  {
-    name: "not valid until tomorrow",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, future),
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "not_yet_valid", claims: future },
-  },
-  {
-    name: "signed by a key the verifier does not hold",
-    publicKey: keys.publicKey,
-    token: issue(otherKeys.privateKey, claims()),
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "invalid_signature" },
-  },
-  {
-    name: "one character of the payload changed",
-    publicKey: keys.publicKey,
-    token: flipPayload(issue(keys.privateKey, claims())),
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "invalid_signature" },
-  },
-  {
-    name: "a lic2 token offered to a lic1 verifier",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, claims()).replace(/^lic1/, "lic2"),
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "malformed" },
-  },
-  {
-    name: "not a token at all",
-    publicKey: keys.publicKey,
-    token: "just-garbage",
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "malformed" },
-  },
-  {
-    name: "an empty string",
-    publicKey: keys.publicKey,
-    token: "",
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "malformed" },
-  },
-  {
-    name: "a good signature over something that is not a license",
-    publicKey: keys.publicKey,
-    token: signedNonsense(),
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "invalid_claims" },
-  },
-  {
-    name: "machine-bound, on the machine it was issued for",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, bound),
-    options: { now: at(NOW), machineFingerprint: FINGERPRINT },
-    expected: { ok: true, claims: bound },
-  },
-  {
-    name: "machine-bound, copied to another box",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, bound),
-    options: { now: at(NOW), machineFingerprint: OTHER_FINGERPRINT },
-    expected: { ok: false, reason: "machine_mismatch", claims: bound },
-  },
-  {
-    name: "machine-bound, with no fingerprint offered",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, bound),
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "machine_mismatch", claims: bound },
-  },
-  {
-    name: "features as a record of values rather than a list of names",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, valued),
-    options: { now: at(NOW) },
-    expected: { ok: true, claims: valued },
-  },
-  {
-    // The web build never makes a request — the exchange happens where the
-    // install does — but it has to verify the license one produced.
-    name: "a license issued in answer to an activation request",
-    publicKey: keys.publicKey,
-    token: fulfilActivation(keys.privateKey, activationRequest, claims()),
-    options: { now: at(NOW), machineFingerprint: FINGERPRINT },
-    expected: { ok: true, claims: activated },
-  },
-  {
-    name: "a license issued in answer to an activation request, on another machine",
-    publicKey: keys.publicKey,
-    token: fulfilActivation(keys.privateKey, activationRequest, claims()),
-    options: { now: at(NOW), machineFingerprint: OTHER_FINGERPRINT },
-    expected: { ok: false, reason: "machine_mismatch", claims: activated },
-  },
-  {
-    name: "a renewal of the license the box is holding",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, renewed),
-    options: { now: at(NOW), previous: PREVIOUS },
-    expected: { ok: true, claims: renewed },
-  },
-  {
-    name: "a renewal that skips a generation",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, skipping),
-    options: { now: at(NOW), previous: PREVIOUS },
-    expected: { ok: false, reason: "renewal_gap", claims: skipping },
-  },
-  {
-    name: "a renewal dated from the next term, while the one it replaces is in grace",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, laterTerm),
-    options: { now: at(NOW), graceSeconds: 7 * DAY, previous: PREVIOUS },
-    expected: { ok: true, claims: laterTerm, status: "expired_in_grace" },
-  },
-  {
-    name: "the same renewal once that grace has run out",
-    publicKey: keys.publicKey,
-    token: issue(keys.privateKey, laterTerm),
-    options: { now: at(NOW + 8 * DAY), graceSeconds: 7 * DAY, previous: PREVIOUS },
-    expected: { ok: false, reason: "not_yet_valid", claims: laterTerm },
-  },
-  {
-    name: "a ring, and a kid naming the key that signed",
-    publicKey: ring,
-    token: issue(keys.privateKey, rotated),
-    options: { now: at(NOW) },
-    expected: { ok: true, claims: rotated },
-  },
-  {
-    name: "a ring, and a kid naming a retired key",
-    publicKey: ring,
-    token: issue(keys.privateKey, claims({ kid: "2019" })),
-    options: { now: at(NOW) },
-    expected: { ok: false, reason: "invalid_signature" },
-  },
-  {
-    name: "a ring, and a token issued before rotation",
-    publicKey: ring,
-    token: issue(keys.privateKey, claims()),
-    options: { now: at(NOW) },
-    expected: { ok: true, claims: claims() },
-  },
-];
+function publicKey(name: string): string {
+  return fixtureKey(name).publicKey;
+}
+
+function toVerifyOptions(options: VectorOptions): VerifyOptions {
+  const resolved: VerifyOptions = { now: () => options.now };
+  if (options.skewSeconds !== undefined) resolved.skewSeconds = options.skewSeconds;
+  if (options.graceSeconds !== undefined) resolved.graceSeconds = options.graceSeconds;
+  if (options.machineFingerprint !== undefined) resolved.machineFingerprint = options.machineFingerprint;
+  if (options.previous !== undefined) resolved.previous = options.previous;
+  return resolved;
+}

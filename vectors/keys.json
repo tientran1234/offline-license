@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "note": "Test keys, generated for this fixture set and published with it. They sign nothing real: the private halves are here so an implementation can prove its issuer produces these tokens byte-for-byte, not only that its verifier accepts them. Never ship one in a product.",
+  "keys": {
+    "signing": {
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAun2V0+j2KEH7e3ML1M52ywj+4VlpW9T4RK8npNtZquc=\n-----END PUBLIC KEY-----\n",
+      "publicKeyRaw": "un2V0-j2KEH7e3ML1M52ywj-4VlpW9T4RK8npNtZquc",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIORw5LA4h76f7m+Cap66zwMpGjvwpcGUirCG2eWVKYeZ\n-----END PRIVATE KEY-----\n"
+    },
+    "other": {
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAHxwAC8Kwcpx9LiUB380h+CMW8a7cHrU4G/nviOgoOl4=\n-----END PUBLIC KEY-----\n",
+      "publicKeyRaw": "HxwAC8Kwcpx9LiUB380h-CMW8a7cHrU4G_nviOgoOl4",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEINnUDhr2SwWy/0CRa/Hw4sWUBHU3SM2Av4ERb8QK0/WW\n-----END PRIVATE KEY-----\n"
+    }
+  }
+}

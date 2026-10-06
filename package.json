@@ -31,6 +31,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "vectors": "UPDATE_VECTORS=1 vitest run tests/vectors.test.ts",
     "prepublishOnly": "pnpm build",
     "prepare": "tsc -p tsconfig.build.json"
   },
