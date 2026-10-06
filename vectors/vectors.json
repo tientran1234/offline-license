@@ -1,0 +1,583 @@
+{
+  "version": 1,
+  "tokenPrefix": "lic1",
+  "fingerprint": "0f3c-vector-machine",
+  "vectors": [
+    {
+      "name": "a current license",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.dVkub4Qhe5XsQlkx0zayBIcHU69nQxXz-Q_SslXlPTIT07l73hTOEqLEt6SG8WXvAjOwfGDhUWlk4ya9Q04WAg",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": true
+      }
+    },
+    {
+      "name": "expired yesterday, inside a week of grace",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE3OTk5MTM2MDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.fDt8Dk-Y6Ypgu804Hpo8lcjJVKz4oXOHQHTyRgZgW8wOG_dsoEDTsl2p7OLkOFVb7ak5MBCoLE0fu02pbsCnCQ",
+      "options": {
+        "graceSeconds": 604800,
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1799913600,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": true,
+        "status": "expired_in_grace"
+      }
+    },
+    {
+      "name": "expired yesterday, past a one-hour grace",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE3OTk5MTM2MDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.fDt8Dk-Y6Ypgu804Hpo8lcjJVKz4oXOHQHTyRgZgW8wOG_dsoEDTsl2p7OLkOFVb7ak5MBCoLE0fu02pbsCnCQ",
+      "options": {
+        "graceSeconds": 3600,
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1799913600,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": false,
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "expired yesterday, no grace asked for",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE3OTk5MTM2MDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.fDt8Dk-Y6Ypgu804Hpo8lcjJVKz4oXOHQHTyRgZgW8wOG_dsoEDTsl2p7OLkOFVb7ak5MBCoLE0fu02pbsCnCQ",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1799913600,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": false,
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "expired thirty seconds ago, inside the default skew",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE3OTk5OTk5NzAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.GqLHEXpHxqNRCyY7SqGriYB7i5w_SkA6wrBmP7_bCIRrpXPk8-s6GWkQ0CA0W15-uQIsaH-hclJX9tEF1iiODg",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1799999970,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": true
+      }
+    },
+    {
+      "name": "not valid until tomorrow",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9LCJub3RCZWZvcmUiOjE4MDAwODY0MDB9.m2CEBP-XgOoAzk41XWQYcVKZYDyA4psHQ_KPqTHxtoQu6eMD3ZHdG0dd4cGGaNK4C4XodYyUR80WDBSL0fzECg",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "notBefore": 1800086400
+        },
+        "ok": false,
+        "reason": "not_yet_valid"
+      }
+    },
+    {
+      "name": "signed by a key the verifier does not hold",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.sDA8l14IkF5eWWW64E_YRTgdYEJb83kX-9qBWXPuJ_ons2dYTQmVmgIndull1Lv2_pZSPOJx-SvnpSbtazQdAg",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "ok": false,
+        "reason": "invalid_signature"
+      }
+    },
+    {
+      "name": "one character of the payload changed",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fA.dVkub4Qhe5XsQlkx0zayBIcHU69nQxXz-Q_SslXlPTIT07l73hTOEqLEt6SG8WXvAjOwfGDhUWlk4ya9Q04WAg",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "ok": false,
+        "reason": "invalid_signature"
+      }
+    },
+    {
+      "name": "a lic2 token offered to a lic1 verifier",
+      "publicKey": "signing",
+      "token": "lic2.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.dVkub4Qhe5XsQlkx0zayBIcHU69nQxXz-Q_SslXlPTIT07l73hTOEqLEt6SG8WXvAjOwfGDhUWlk4ya9Q04WAg",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "not a token at all",
+      "publicKey": "signing",
+      "token": "just-garbage",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "an empty string",
+      "publicKey": "signing",
+      "token": "",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "a good signature over something that is not a license",
+      "publicKey": "signing",
+      "token": "lic1.eyJpZCI6IngifQ.ns3H3QKOELomtNOUIl7O_GzUg_JcgcrW0hLZckrmRgIgaC5fWnGkjw-26mNq4Fh2urH4pZaZMXPpapqE7NoTDw",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "ok": false,
+        "reason": "invalid_claims"
+      }
+    },
+    {
+      "name": "machine-bound, on the machine it was issued for",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9LCJtYWNoaW5lIjoickdkSHMzZWtLR1RnWnc3eXlOMHZ0WkV0NVVzbG9JdjhINFJyNS12WFpuayJ9.ZfIjARD5U5nXTrjDnkFdqqUu05x4TpEz6oSIZ559AxW5xCMXwihktKNGxIM8LO3XyuAu3Y470pl5gudoiDIrDw",
+      "options": {
+        "machineFingerprint": "0f3c-vector-machine",
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "machine": "rGdHs3ekKGTgZw7yyN0vtZEt5UsloIv8H4Rr5-vXZnk"
+        },
+        "ok": true
+      }
+    },
+    {
+      "name": "machine-bound, copied to another box",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9LCJtYWNoaW5lIjoickdkSHMzZWtLR1RnWnc3eXlOMHZ0WkV0NVVzbG9JdjhINFJyNS12WFpuayJ9.ZfIjARD5U5nXTrjDnkFdqqUu05x4TpEz6oSIZ559AxW5xCMXwihktKNGxIM8LO3XyuAu3Y470pl5gudoiDIrDw",
+      "options": {
+        "machineFingerprint": "9a11-someone-elses-box",
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "machine": "rGdHs3ekKGTgZw7yyN0vtZEt5UsloIv8H4Rr5-vXZnk"
+        },
+        "ok": false,
+        "reason": "machine_mismatch"
+      }
+    },
+    {
+      "name": "machine-bound, with no fingerprint offered",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9LCJtYWNoaW5lIjoickdkSHMzZWtLR1RnWnc3eXlOMHZ0WkV0NVVzbG9JdjhINFJyNS12WFpuayJ9.ZfIjARD5U5nXTrjDnkFdqqUu05x4TpEz6oSIZ559AxW5xCMXwihktKNGxIM8LO3XyuAu3Y470pl5gudoiDIrDw",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "machine": "rGdHs3ekKGTgZw7yyN0vtZEt5UsloIv8H4Rr5-vXZnk"
+        },
+        "ok": false,
+        "reason": "machine_mismatch"
+      }
+    },
+    {
+      "name": "features as a record of values rather than a list of names",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjp7ImJldGEiOmZhbHNlLCJzZWF0cyI6MjUsInNzbyI6dHJ1ZSwidGllciI6InBybyJ9LCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.qcI1pISXxIjHgq0m03dszUJERd69vJnY7gRgDrbHOhLgcS7SHAyxf5kbFMGSbHWtm5LCFh8yWjPvUHxw6YVwCg",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": {
+            "beta": false,
+            "seats": 25,
+            "sso": true,
+            "tier": "pro"
+          },
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": true
+      }
+    },
+    {
+      "name": "a license issued in answer to an activation request",
+      "publicKey": "signing",
+      "token": "lic1.eyJhY3RpdmF0aW9uIjoibVVvQnJVTzN0ZFpyMlc3TiIsImV4cGlyZXNBdCI6MTgwMjU5MjAwMCwiZmVhdHVyZXMiOlsiZXhwb3J0Iiwic3NvIl0sImlkIjoibGljX3Rlc3RfMSIsImlzc3VlZEF0IjoxNzk5OTk2NDAwLCJsaWNlbnNlZSI6IkFjbWUgTHRkIiwibGltaXRzIjp7InNlYXRzIjoxMH0sIm1hY2hpbmUiOiJyR2RIczNla0tHVGdadzd5eU4wdnRaRXQ1VXNsb0l2OEg0UnI1LXZYWm5rIn0.xCMHhMKa8adFwx-RbDPrX1sqaMwyr4O1fDNB7nF-srHUytppYzceZlyrEVVFJuwpR3KfxaV-2tEfXGKzvTL6DA",
+      "options": {
+        "machineFingerprint": "0f3c-vector-machine",
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "activation": "mUoBrUO3tdZr2W7N",
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "machine": "rGdHs3ekKGTgZw7yyN0vtZEt5UsloIv8H4Rr5-vXZnk"
+        },
+        "ok": true
+      }
+    },
+    {
+      "name": "a license issued in answer to an activation request, on another machine",
+      "publicKey": "signing",
+      "token": "lic1.eyJhY3RpdmF0aW9uIjoibVVvQnJVTzN0ZFpyMlc3TiIsImV4cGlyZXNBdCI6MTgwMjU5MjAwMCwiZmVhdHVyZXMiOlsiZXhwb3J0Iiwic3NvIl0sImlkIjoibGljX3Rlc3RfMSIsImlzc3VlZEF0IjoxNzk5OTk2NDAwLCJsaWNlbnNlZSI6IkFjbWUgTHRkIiwibGltaXRzIjp7InNlYXRzIjoxMH0sIm1hY2hpbmUiOiJyR2RIczNla0tHVGdadzd5eU4wdnRaRXQ1VXNsb0l2OEg0UnI1LXZYWm5rIn0.xCMHhMKa8adFwx-RbDPrX1sqaMwyr4O1fDNB7nF-srHUytppYzceZlyrEVVFJuwpR3KfxaV-2tEfXGKzvTL6DA",
+      "options": {
+        "machineFingerprint": "9a11-someone-elses-box",
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "activation": "mUoBrUO3tdZr2W7N",
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "machine": "rGdHs3ekKGTgZw7yyN0vtZEt5UsloIv8H4Rr5-vXZnk"
+        },
+        "ok": false,
+        "reason": "machine_mismatch"
+      }
+    },
+    {
+      "name": "a renewal of the license the box is holding",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9LCJyZW5ld3MiOiJsaWNfdmVjdG9yXzAifQ.5nTQYlIkqSa_OsgI4PpshThqKvMCPml8dm2J9iI1ZeZjK78j2po4wGfAgjyT2nTDKfQe95kS_rdFge1EOcV4Bg",
+      "options": {
+        "now": 1800000000,
+        "previous": {
+          "expiresAt": 1799913600,
+          "id": "lic_vector_0"
+        }
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "renews": "lic_vector_0"
+        },
+        "ok": true
+      }
+    },
+    {
+      "name": "a renewal that skips a generation",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9LCJyZW5ld3MiOiJsaWNfdmVjdG9yX3NraXBwZWQifQ.YHVHtMhxDJaZo5LpkJA5yJKJT2jrO2H7P3H5Rbq4o8RmO4WsJ8JDm-u4bQbMr2RKOFx2fQFE6bhw6uFAHUnnBw",
+      "options": {
+        "now": 1800000000,
+        "previous": {
+          "expiresAt": 1799913600,
+          "id": "lic_vector_0"
+        }
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "renews": "lic_vector_skipped"
+        },
+        "ok": false,
+        "reason": "renewal_gap"
+      }
+    },
+    {
+      "name": "a renewal dated from the next term, while the one it replaces is in grace",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MzQxMjgwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9LCJub3RCZWZvcmUiOjE4MDI1OTIwMDAsInJlbmV3cyI6ImxpY192ZWN0b3JfMCJ9.ODDQLhbTCyi1F2I5qKaqj6W0CutgWBORb33ac1THIznmnhc2_xvAa1Y6-3V-It2EpOBIQ9Swh8VYoDz8AT6zDA",
+      "options": {
+        "graceSeconds": 604800,
+        "now": 1800000000,
+        "previous": {
+          "expiresAt": 1799913600,
+          "id": "lic_vector_0"
+        }
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1834128000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "notBefore": 1802592000,
+          "renews": "lic_vector_0"
+        },
+        "ok": true,
+        "status": "expired_in_grace"
+      }
+    },
+    {
+      "name": "the same renewal once that grace has run out",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MzQxMjgwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9LCJub3RCZWZvcmUiOjE4MDI1OTIwMDAsInJlbmV3cyI6ImxpY192ZWN0b3JfMCJ9.ODDQLhbTCyi1F2I5qKaqj6W0CutgWBORb33ac1THIznmnhc2_xvAa1Y6-3V-It2EpOBIQ9Swh8VYoDz8AT6zDA",
+      "options": {
+        "graceSeconds": 604800,
+        "now": 1800691200,
+        "previous": {
+          "expiresAt": 1799913600,
+          "id": "lic_vector_0"
+        }
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1834128000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          },
+          "notBefore": 1802592000,
+          "renews": "lic_vector_0"
+        },
+        "ok": false,
+        "reason": "not_yet_valid"
+      }
+    },
+    {
+      "name": "a ring, and a kid naming the key that signed",
+      "publicKey": {
+        "2025": "other",
+        "2026": "signing"
+      },
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwia2lkIjoiMjAyNiIsImxpY2Vuc2VlIjoiQWNtZSBMdGQiLCJsaW1pdHMiOnsic2VhdHMiOjEwfX0.EnXUZHgbklaboOuUYRUV2SASsflQ0fF9AaHbZLFrNA8N2t3fbKfDlzl_HBzAnagNuYEbHR8e-iW6Mk4S2zrzCQ",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "kid": "2026",
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": true
+      }
+    },
+    {
+      "name": "a ring, and a kid naming a retired key",
+      "publicKey": {
+        "2025": "other",
+        "2026": "signing"
+      },
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwia2lkIjoiMjAxOSIsImxpY2Vuc2VlIjoiQWNtZSBMdGQiLCJsaW1pdHMiOnsic2VhdHMiOjEwfX0.Nr9opGNEYtMTldRZPgiKFmZyDsLCgUXsDneUH0gw4cWl6a3fY2Y5KXCxs_OTrvUQm_Op9qqoQaDiqw6lu0-2Ag",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "ok": false,
+        "reason": "invalid_signature"
+      }
+    },
+    {
+      "name": "a ring, and a token issued before rotation",
+      "publicKey": {
+        "2025": "other",
+        "2026": "signing"
+      },
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.dVkub4Qhe5XsQlkx0zayBIcHU69nQxXz-Q_SslXlPTIT07l73hTOEqLEt6SG8WXvAjOwfGDhUWlk4ya9Q04WAg",
+      "options": {
+        "now": 1800000000
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": true
+      }
+    }
+  ]
+}

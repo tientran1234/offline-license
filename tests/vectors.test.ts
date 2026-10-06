@@ -27,6 +27,7 @@ describe("the published fixture set", () => {
     // canonical JSON, so an unchanged release regenerates byte-for-byte; a diff
     // here means the issuer moved and the published set has to be re-cut.
     if (process.env.UPDATE_VECTORS === "1") writeVectorFile();
+    expect(vectorFile.vectors.length, "vectors/vectors.json is missing — run `pnpm vectors`").toBeGreaterThan(0);
     expect(readFixture("vectors.json"), "run `pnpm vectors` to re-cut the set").toBe(
       serializeVectorFile(buildVectorFile()),
     );

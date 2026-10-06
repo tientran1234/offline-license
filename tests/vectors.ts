@@ -78,7 +78,24 @@ export interface VectorFile {
 }
 
 export const keyFile = JSON.parse(readFixture("keys.json")) as KeyFile;
-export const vectorFile = JSON.parse(readFixture("vectors.json")) as VectorFile;
+export const vectorFile = loadVectorFile();
+
+/**
+ * The vectors as checked in, or an empty set when the file is not there.
+ *
+ * Absent is not a state the suite tolerates — `vectors.test.ts` fails on it in
+ * several places at once. But it has to be *loadable*, because the command that
+ * re-cuts the file runs through that same suite, and a loader that threw on the
+ * way in could never create what it was complaining about.
+ */
+function loadVectorFile(): VectorFile {
+  try {
+    return JSON.parse(readFixture("vectors.json")) as VectorFile;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    return { version: 0, tokenPrefix: "", fingerprint: "", vectors: [] };
+  }
+}
 
 /** The fixture keys, by name. Both builds and the generator read these. */
 export const fixtureKeys = keyFile.keys;
