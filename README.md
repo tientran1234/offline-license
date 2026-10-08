@@ -39,6 +39,7 @@ license.assertFeature("billing");   // throws LicenseError { reason: "invalid_cl
 | Shape `lic1.<payload>.<sig>` | `malformed` | Cheapest, and it rejects the most junk |
 | Ed25519 signature over `lic1.<payload>` | `invalid_signature` | Nothing below reads a byte an attacker could have written |
 | Claims schema | `invalid_claims` | A valid signature over the wrong shape is still not a license |
+| Revocation, when a list is given | `revoked` / `revocation_stale` | A withdrawn license is the wrong license whatever else is true of it |
 | Renewal chain, when a predecessor is given | `renewal_gap` | A renewal from the wrong generation is the wrong file whatever the clock says |
 | Clock has not gone backwards | `clock_rollback` | An expired license becomes "valid" if the clock is set back — check before expiry |
 | `notBefore` / `expiresAt` (± skew) | `not_yet_valid` / `expired` | A grace period, when set, only moves where `expired` begins |
@@ -395,6 +396,88 @@ out of it under the same key. Those two claims decide how long the inherited
 window runs, and an expiry anyone could edit with a text editor would be no
 window at all.
 
+## Revocation
+
+Offline licensing has no revocation worth the name, and the end of this README
+says so. There is no list to consult at check time and nothing to tell an
+install that has gone quiet. What a signed list adds is the other half: an
+issuer that has withdrawn a license can say so, and every install the file
+*does* reach — an update bundle, a USB stick, the channel the license itself
+came down — refuses that license from then on.
+
+```ts
+import { issueRevocationList, readRevocationList, verify } from "offline-license";
+
+// On the issuer, when a license is withdrawn.
+const list = issueRevocationList(privateKey, {
+  issuedAt: now(),
+  expiresAt: now() + 30 * 86_400,   // how long an install should believe it
+  revoked: [{ id: "lic_7f3a", revokedAt: now(), reason: "chargeback" }],
+});
+
+// In the product: read once at startup, then hand the result to every check.
+const revocations = readRevocationList(publicKey, await readFile("revocations.rev", "utf8"));
+verify(publicKey, token, { revocations });
+// { ok: false, reason: "revoked", claims: { id: "lic_7f3a", … } }
+```
+
+`revocations` is the list as `readRevocationList` returned it, the same way
+`previous` is a predecessor the caller already verified. Reading it is a
+signature check: a `rev1.<payload>.<signature>` blob over canonical JSON, signed
+by the issuing key and naming it with the same `kid` a token does. A list that
+does not hold together throws rather than yielding an empty one — an empty list
+revokes nothing, which is precisely what whoever mangled the file was after.
+
+**A license the list names is refused**, with reason `revoked` and the claims
+handed back so a screen can say which license was withdrawn. The check runs
+before the clock and the chain, because a withdrawn license is withdrawn
+whatever the time is and whichever generation it belongs to.
+
+**A revocation dated in the future is a notice, not yet a refusal.** `revokedAt`
+is a date so a list can be published before it bites — the end of a billing
+period, the last day of a trial — without the issuer being at a keyboard on the
+day. It bites on the second it names, with no slack from `skewSeconds`. That is
+the one place this reads differently from expiry: slack on an expiry keeps a
+paying customer working through a disagreement about the hour, while slack here
+would only postpone a refusal the issuer has already decided on.
+
+**Once the list's own `expiresAt` has passed, every license is refused** as
+`revocation_stale` — the revoked ones and the rest. This is the part that gives
+an offline list teeth. A revoked box can simply stop collecting new lists, so a
+list believed forever is advisory and nothing more; dating one makes an install
+that was told to check revocation refuse to run on evidence older than the
+issuer vouched for. Set `expiresAt` to an interval the product can really
+refresh over, and be aware of what you are buying: a customer whose updates
+break loses the product on the day the list goes stale. An issuer who would
+rather honour a revoked license than lock out a working install leaves
+`expiresAt` off, and the list is then believed until another replaces it.
+
+A product that supplies no list checks nothing — exactly what every install did
+before lists existed.
+
+From the shell:
+
+```bash
+# On the issuer.
+offline-license revoke --key ./private.pem \
+  --id lic_7f3a --reason "lic_7f3a=chargeback" --expires-in 30d --out ./revocations.rev
+
+# In the product, or a release script.
+offline-license verify --key ./public.pem --token "$LICENSE" --revocations ./revocations.rev
+# invalid: revoked — Acme Ltd (lic_7f3a)
+```
+
+`--revocations` takes a file and not an inline blob: a list is not something an
+operator pastes, and stdin is where the token under test arrives. It is read
+under the same `--key`, and a file that key did not sign exits 2 rather than
+rejecting the license — the operator pointed at the wrong file, and a command
+that shrugged and carried on without the list would call a revoked license
+valid.
+
+What none of this does is stop someone who deletes the list and patches the
+check out. Nothing running on the customer's machine can, which is the same
+limit machine binding has.
+
 ## Check audit
 
 The product knows why it stopped letting people in; its admin page does not.
@@ -493,6 +576,9 @@ offline-license issue --key ./keys/private.pem \
 
 offline-license verify --key ./keys/public.pem --token "$LICENSE"
 echo "$LICENSE" | offline-license verify --key ./keys/public.pem --json
+
+offline-license revoke --key ./keys/private.pem \
+  --id lic_7f3a --expires-in 30d             # prints the revocation list
 ```
 
 Exit codes are the contract, because a release script branches on them:
@@ -508,6 +594,8 @@ token from stdin when given no `--token`, so `issue | verify` needs no temp
 file, and `--json` prints the whole `VerifyResult` without changing the code.
 
 `request` and `fulfil` are the two halves of the activation exchange, above.
+`revoke` signs a revocation list, and `verify --revocations` checks a token
+against one.
 
 `--this-machine` binds to — or checks against — this box's
 `defaultFingerprint()`; `--machine <fingerprint>` issues for someone else's.
@@ -625,6 +713,11 @@ is not either useless (a user agent string) or a tracking id, and a fingerprint
 that moves when someone changes a font setting locks out a paying customer. In
 Electron, pass the one the main process already has.
 
+`readRevocationList` is here too, and signing is not: a browser is never the
+issuer, so there is no `issueRevocationList` any more than there is an `issue`.
+An Electron renderer handed an already-read list by its main process needs
+neither.
+
 WebCrypto needs a secure context, so a page served over `http://` has no
 `crypto.subtle` and the build says so rather than failing with an undefined
 property.
@@ -660,7 +753,7 @@ when `localStorage` is not where the mark belongs.
 
 ## Test vectors
 
-`vectors/` holds twenty-five tokens, the keys that signed them, and the verdict
+`vectors/` holds twenty-nine tokens, the keys that signed them, and the verdict
 each must produce. It ships in the package.
 
 ```
@@ -732,8 +825,11 @@ model needs more.
 
 ## What it does not do
 
-- **Revocation.** Offline means no list to consult. Use short expiries and
-  re-issue; that is the whole trade.
+- **Revocation at check time.** There is no list to consult and no way to reach
+  an install that has gone quiet. A signed list covers the installs a file still
+  reaches, and dating it makes one fail closed — see Revocation — but short
+  expiries and re-issue remain the only thing that needs nothing of the
+  customer's machine.
 - **Obfuscation.** The public key and this code are visible to whoever has the
   binary. This library makes forging a license impossible; it does not make
   removing the check impossible. Nothing does.
@@ -744,7 +840,7 @@ model needs more.
 pnpm add offline-license      # Node >= 20, zero runtime dependencies
 npx offline-license --help    # the CLI, without installing it
 
-pnpm test                     # 284 tests: round-trip, tampering, time, grace, renewals, binding, clock, guard, features, metered limits, offline activation, check audit, rotation, CLI, license files, the web build, the published vectors
+pnpm test                     # 320 tests: round-trip, tampering, time, grace, renewals, revocation, binding, clock, guard, features, metered limits, offline activation, check audit, rotation, CLI, license files, the web build, the published vectors
 pnpm build                    # ESM + .d.ts into dist/
 pnpm vectors                  # re-cut vectors/ after a change to the issuer
 ```

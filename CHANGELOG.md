@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-08
+
+- Revocation: a signed `rev1` list of withdrawn license ids that `verify` refuses as `revoked`, dated so an install told to check it fails closed on a list it has stopped refreshing, with a CLI `revoke` subcommand, so an issuer that has withdrawn a license is no longer left waiting out the term on every install a file can still reach.
+
 ## 2026-10-06
 
 - Shared test vectors: a `vectors/` fixture set (keys, tokens, expected results) run by both the Node and the web build, published so third-party implementations can prove compatibility, so the table the two builds agree on is bytes on disk a verifier in another language can check itself against rather than tokens that lived for a few milliseconds inside one test process.

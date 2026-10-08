@@ -19,3 +19,4 @@ Same rule: one item per change, in order.
 - [x] Renewal chain: a license may carry `renews: <previous id>`; `verify` accepts the newer license while the old one is in grace, and refuses a renewal that skips a generation.
 - [x] Check audit: `LicenseGuard({ onCheck })` plus a small rotating log store so a self-hosted install can show "last verified at" and the last failures on its admin page.
 - [x] Shared test vectors: a `vectors/` fixture set (keys, tokens, expected results) run by both the Node and the web build, published so third-party implementations can prove compatibility.
+- [x] Revocation: a signed `rev1` list of withdrawn license ids that `verify` refuses as `revoked`, dated so an install told to check it fails closed on a list it has stopped refreshing, with a CLI `revoke` subcommand.
