@@ -22,6 +22,11 @@ export {
 } from "./activation.js";
 export type { ActivationRequestInput, FulfilmentClaims, MachineClaim } from "./activation.js";
 
+export { issueRevocationList, readRevocationList } from "./revocation.js";
+export type { RevocationListInput } from "./revocation.js";
+export { assertRevocationClaims, REVOCATION_PREFIX, RevocationError } from "./core.js";
+export type { RevocationClaims, RevocationEntry, RevocationList } from "./core.js";
+
 export { readLicenseFile, writeLicenseFile, LicenseFileError, LICENSE_FILE_VERSION } from "./file.js";
 export type { LicenseFile, LicenseFileInput } from "./file.js";
 

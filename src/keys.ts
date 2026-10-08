@@ -1,4 +1,11 @@
-import { createPrivateKey, createPublicKey, generateKeyPairSync, KeyObject } from "node:crypto";
+import {
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  KeyObject,
+  verify as cryptoVerify,
+} from "node:crypto";
+import { fromBase64Url } from "./encoding.js";
 
 /** PEM string or an already-built KeyObject. */
 export type KeyInput = string | KeyObject;
@@ -60,5 +67,57 @@ function assertEd25519(key: KeyObject, kind: "private" | "public") {
   if (key.type !== kind) throw new TypeError(`expected a ${kind} key, got a ${key.type} key`);
   if (key.asymmetricKeyType !== "ed25519") {
     throw new TypeError(`expected an ed25519 key, got ${key.asymmetricKeyType ?? "unknown"}`);
+  }
+}
+
+/**
+ * The keys that may have signed this payload — a license token's, or a
+ * revocation list's. Both name their key the same way, so both choose it here.
+ *
+ * Choosing by `kid` means reading the payload before the signature is checked,
+ * which is why the kid is used for nothing else: it picks a key, and the
+ * payload then has to survive that key like any other. Editing the kid changes
+ * the signed bytes, so a forged one fails the check it was meant to escape.
+ *
+ * A kid naming no key in the ring yields no candidate at all rather than
+ * falling back to the rest of it. Falling back would make a retired key
+ * indistinguishable from a current one, which is the entire point of the ring.
+ */
+export function selectKeys(input: PublicKeyInput, payload: string): KeyObject[] {
+  if (!isKeyRing(input)) return [toPublicKey(input)];
+
+  const kid = peekKid(payload);
+  if (kid === undefined) {
+    // Issued before rotation, so it names no key. Every key in the ring is one
+    // the caller trusts, so try them all.
+    return Object.values(input).map(toPublicKey);
+  }
+  const named = input[kid];
+  return named === undefined ? [] : [toPublicKey(named)];
+}
+
+/** Whether any of the candidate keys signed these bytes. */
+export function signedByAny(keys: readonly KeyObject[], signed: Buffer, signature: Buffer): boolean {
+  return keys.some((key) => {
+    try {
+      return cryptoVerify(null, signed, key, signature);
+    } catch {
+      // A key the runtime will not use for this signature is simply not the one.
+      return false;
+    }
+  });
+}
+
+/**
+ * The kid from an unverified payload — for key selection and nothing else, so
+ * anything unreadable is simply "no kid" rather than an error of its own.
+ */
+function peekKid(payload: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(fromBase64Url(payload).toString("utf8"));
+    const kid = (parsed as Record<string, unknown>)?.kid;
+    return typeof kid === "string" && kid !== "" ? kid : undefined;
+  } catch {
+    return undefined;
   }
 }

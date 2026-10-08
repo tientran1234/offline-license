@@ -47,6 +47,98 @@ export interface Predecessor {
   expiresAt?: number | undefined;
 }
 
+/** Version prefix of a revocation list. Inside the signed bytes, like a token's. */
+export const REVOCATION_PREFIX = "rev1";
+
+/**
+ * A license the issuer has withdrawn, and when the withdrawal takes effect.
+ *
+ * `revokedAt` is a date rather than a flag so a list can be published before it
+ * bites — the end of a billing period, the last day of a trial — without the
+ * issuer having to be at a keyboard on the day it does.
+ */
+export interface RevocationEntry {
+  id: string;
+  /** Unix seconds. Before it, the entry is a notice; after it, a refusal. */
+  revokedAt: number;
+  /** Free text for an admin page. No check reads it. */
+  reason?: string;
+}
+
+/**
+ * What a verifier checks a license against: the list readRevocationList() hands
+ * back, already proved to be the issuer's.
+ *
+ * `expiresAt` is what gives an offline list teeth. A revoked install can simply
+ * stop collecting new lists, so a list that is believed forever is only ever
+ * advisory; dating one makes the install refuse to run on evidence older than
+ * the issuer was willing to vouch for. Leaving it out says the opposite — this
+ * list is good until another replaces it — and is the right choice when losing
+ * a license to a missed update would be worse than honouring a revoked one.
+ */
+export interface RevocationList {
+  issuedAt: number;
+  /** Unix seconds. Past it the list is stale and stops being believed. */
+  expiresAt?: number;
+  revoked: readonly RevocationEntry[];
+}
+
+/** A list's signed claims: the list, plus the kid naming the key that signed it. */
+export interface RevocationClaims extends RevocationList {
+  kid?: string;
+}
+
+/** A list this release cannot read. `reason` is there because the UIs differ. */
+export class RevocationError extends Error {
+  override readonly name = "RevocationError";
+  constructor(
+    readonly reason: "malformed" | "invalid_claims" | "invalid_signature",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Runtime shape check for a decoded list — never trust the wire. */
+export function assertRevocationClaims(value: unknown): asserts value is RevocationClaims {
+  if (!value || typeof value !== "object") {
+    throw new RevocationError("invalid_claims", "a revocation list must be an object");
+  }
+  const list = value as Record<string, unknown>;
+
+  if (typeof list.issuedAt !== "number" || !Number.isFinite(list.issuedAt)) {
+    throw new RevocationError("invalid_claims", "issuedAt must be a number");
+  }
+  if (list.expiresAt !== undefined && (typeof list.expiresAt !== "number" || !Number.isFinite(list.expiresAt))) {
+    throw new RevocationError("invalid_claims", "expiresAt must be a number when present");
+  }
+  if (list.kid !== undefined && (typeof list.kid !== "string" || list.kid === "")) {
+    throw new RevocationError("invalid_claims", "kid must be a non-empty string when present");
+  }
+  if (!Array.isArray(list.revoked)) {
+    throw new RevocationError("invalid_claims", "revoked must be an array");
+  }
+  for (const entry of list.revoked as readonly unknown[]) {
+    assertRevocationEntry(entry);
+  }
+}
+
+function assertRevocationEntry(value: unknown): asserts value is RevocationEntry {
+  if (!value || typeof value !== "object") {
+    throw new RevocationError("invalid_claims", "a revoked entry must be an object");
+  }
+  const entry = value as Record<string, unknown>;
+  if (typeof entry.id !== "string" || entry.id === "") {
+    throw new RevocationError("invalid_claims", "a revoked entry needs a non-empty id");
+  }
+  if (typeof entry.revokedAt !== "number" || !Number.isFinite(entry.revokedAt)) {
+    throw new RevocationError("invalid_claims", `revokedAt must be a number (${entry.id})`);
+  }
+  if (entry.reason !== undefined && typeof entry.reason !== "string") {
+    throw new RevocationError("invalid_claims", `reason must be a string when present (${entry.id})`);
+  }
+}
+
 export interface VerifyOptions {
   /** Unix seconds. Injected for tests; defaults to the wall clock. */
   now?: () => number;
