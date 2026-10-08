@@ -10,10 +10,11 @@ import {
   type MachineClaim,
 } from "./activation.js";
 import type { FeatureValue, Features, LicenseClaims } from "./claims.js";
-import type { Predecessor, VerifyOptions } from "./core.js";
+import type { Predecessor, RevocationEntry, RevocationList, VerifyOptions } from "./core.js";
 import { issue } from "./issue.js";
 import { generateKeyPair, type PublicKeyInput } from "./keys.js";
 import { bindMachine, defaultFingerprint } from "./machine.js";
+import { issueRevocationList, readRevocationList, type RevocationListInput } from "./revocation.js";
 import { verify } from "./verify.js";
 
 /**
@@ -45,6 +46,7 @@ const HELP = {
   verify   --key <public.pem> [--token <token> | --token-file <file>]
   request  --this-machine | --machine <fingerprint> [options]
   fulfil   --key <private.pem> --id <id> [--request <request>] [options]
+  revoke   --key <private.pem> --id <id> [options]
 
 Exit codes: 0 done / valid, 1 license rejected, 2 bad usage.
 Run \`offline-license <command> --help\` for one command's options.
@@ -95,6 +97,11 @@ Run \`offline-license <command> --help\` for one command's options.
                       renewal_gap, and one whose term has not begun is accepted
                       while this license is inside --grace.
   --previous-file <f> Read that token from a file.
+  --revocations <f>   The issuer's rev1 list, read under the same --key. A
+                      license it names is refused as revoked; once the list's
+                      own expiry has passed every license is refused as
+                      revocation_stale. Only a file: a list is not something an
+                      operator pastes, and stdin is where the token arrives.
   --now <t>           Unix seconds or an ISO 8601 date. Overrides the clock.
   --json              Print the whole VerifyResult. The exit code is unchanged.
 
@@ -133,6 +140,27 @@ request, which is the point of asking.
 A request that does not hold together exits 2 — it is input an operator can
 retype, not a license that was rejected.
 `,
+  revoke: `offline-license revoke --key <private.pem> --id <id> [options]
+
+  --key <file>        PKCS#8 PEM of the issuing private key.
+  --id <id>           Repeatable. A license to withdraw.
+  --reason <id=text>  Repeatable. Why that license was withdrawn, for an admin
+                      page to show. No check reads it.
+  --revoked-at <t>    When the withdrawals take effect. Unix seconds or an ISO
+                      8601 date. Default: issuedAt, so they bite on arrival.
+  --expires-in <dur>  How long an install should believe this list: 7d, 24h.
+                      Past it every license is refused as revocation_stale, so
+                      set it to an interval the product can really refresh over.
+  --expires-at <t>    The same, as a date. Excludes --expires-in.
+  --kid <name>        Name the signing key, so a verifier holding several knows
+                      which one to try.
+  --now <t>           Override issuedAt. For reproducible lists.
+  --out <file>        Write the list there instead of stdout.
+
+Prints a rev1.… list to publish by whatever channel reaches the installs. It
+revokes nothing on a box that never receives it — that is what --expires-in is
+for, and the README is plain about what offline revocation can and cannot do.
+`,
 };
 
 export async function run(argv: readonly string[], io: CliIo): Promise<number> {
@@ -149,6 +177,8 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
         return await requestCommand(rest, io);
       case "fulfil":
         return await fulfilCommand(rest, io);
+      case "revoke":
+        return await revokeCommand(rest, io);
       case "help":
       case "--help":
       case "-h":
@@ -358,6 +388,62 @@ async function fulfilCommand(argv: readonly string[], io: CliIo): Promise<number
   return await emit(values.key, values.out, io, (privateKey) => fulfilActivation(privateKey, request, claims));
 }
 
+async function revokeCommand(argv: readonly string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      key: { type: "string" },
+      id: { type: "string", multiple: true },
+      reason: { type: "string", multiple: true },
+      "revoked-at": { type: "string" },
+      "expires-in": { type: "string" },
+      "expires-at": { type: "string" },
+      kid: { type: "string" },
+      now: { type: "string" },
+      out: { type: "string" },
+      help: { type: "boolean", short: "h" },
+    },
+  });
+  if (values.help) {
+    io.out(HELP.revoke);
+    return OK;
+  }
+
+  const ids = values.id ?? [];
+  // An empty list is a legitimate thing to sign — it is what an issuer publishes
+  // to say "nothing is revoked, and here is today's proof of that" — but not
+  // from a command line that asked to revoke something and named nothing.
+  if (ids.length === 0) throw new UsageError("--id is required");
+
+  const issuedAt = values.now === undefined ? nowSeconds() : asTime(values.now, "--now");
+  const revokedAt = values["revoked-at"] === undefined ? issuedAt : asTime(values["revoked-at"], "--revoked-at");
+  const reasons = pairs(values.reason, "--reason", (text) => text);
+  for (const id of Object.keys(reasons)) {
+    if (!ids.includes(id)) throw new UsageError(`--reason names ${id}, which no --id revokes`);
+  }
+
+  const input: RevocationListInput = {
+    issuedAt,
+    revoked: ids.map((id) => {
+      const entry: RevocationEntry = { id, revokedAt };
+      const reason = reasons[id];
+      if (reason !== undefined) entry.reason = reason;
+      return entry;
+    }),
+  };
+  if (values["expires-at"] !== undefined && values["expires-in"] !== undefined) {
+    throw new UsageError("--expires-at and --expires-in are mutually exclusive");
+  }
+  if (values["expires-at"] !== undefined) {
+    input.expiresAt = asTime(values["expires-at"], "--expires-at");
+  } else if (values["expires-in"] !== undefined) {
+    input.expiresAt = issuedAt + asDuration(values["expires-in"], "--expires-in");
+  }
+  if (values.kid !== undefined) input.kid = values.kid;
+
+  return await emit(values.key, values.out, io, (privateKey) => issueRevocationList(privateKey, input));
+}
+
 /**
  * Read the key, sign, and put the result where the operator asked.
  *
@@ -399,6 +485,7 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
       grace: { type: "string" },
       previous: { type: "string" },
       "previous-file": { type: "string" },
+      revocations: { type: "string" },
       now: { type: "string" },
       json: { type: "boolean" },
       help: { type: "boolean", short: "h" },
@@ -423,6 +510,9 @@ async function verifyCommand(argv: readonly string[], io: CliIo): Promise<number
   if (fingerprint !== undefined) options.machineFingerprint = fingerprint;
   const previous = await readPrevious(values.previous, values["previous-file"]);
   if (previous !== undefined) options.previous = predecessor(publicKey, previous.trim(), options);
+  if (values.revocations !== undefined) {
+    options.revocations = revocations(publicKey, await readText(values.revocations, "--revocations"));
+  }
 
   let result;
   try {
@@ -473,6 +563,22 @@ function predecessor(publicKey: PublicKeyInput, token: string, options: VerifyOp
     throw new UsageError("--previous: not a license signed by this key");
   }
   return result.claims;
+}
+
+/**
+ * The issuer's list, read under the same key the token is checked with.
+ *
+ * A list the key did not sign is bad input and not a rejected license: the
+ * operator pointed at the wrong file, or at one that was edited in transit, and
+ * a command that shrugged and verified without it would report a revoked
+ * license as valid.
+ */
+function revocations(publicKey: PublicKeyInput, list: string): RevocationList {
+  try {
+    return readRevocationList(publicKey, list);
+  } catch (err) {
+    throw new UsageError(`--revocations: ${(err as Error).message}`);
+  }
 }
 
 const describe = (claims: LicenseClaims) => `${claims.licensee} (${claims.id})`;

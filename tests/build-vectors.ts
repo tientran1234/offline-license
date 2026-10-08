@@ -6,6 +6,7 @@ import {
   fulfilActivation,
   issue,
   type LicenseClaims,
+  type RevocationList,
 } from "../src/index.js";
 import { canonicalJson } from "../src/encoding.js";
 import { fixtureKey, vectorsDir, type VectorEntry, type VectorFile } from "./vectors.js";
@@ -76,6 +77,25 @@ const PREVIOUS = { id: "lic_vector_0", expiresAt: NOW - DAY };
 const renewed = claims({ renews: PREVIOUS.id });
 const laterTerm = claims({ renews: PREVIOUS.id, notBefore: NOW + 30 * DAY, expiresAt: NOW + 395 * DAY });
 const skipping = claims({ renews: "lic_vector_skipped" });
+
+/**
+ * The lists a verifier is handed, as readRevocationList() would hand them over.
+ *
+ * The signed `rev1` blob is not in the set — see vectors/README.md. What a
+ * verifier has to agree on is the verdict a list produces, and the list that
+ * produces it is plain claims by the time the check sees them.
+ */
+const REVOKED = { id: "lic_test_1", revokedAt: NOW - DAY, reason: "chargeback" };
+const currentList: RevocationList = { issuedAt: NOW - DAY, revoked: [REVOKED] };
+const staleList: RevocationList = {
+  issuedAt: NOW - 90 * DAY,
+  expiresAt: NOW - DAY,
+  revoked: [{ id: "lic_vector_other", revokedAt: NOW - 60 * DAY }],
+};
+const pendingList: RevocationList = {
+  issuedAt: NOW,
+  revoked: [{ id: "lic_test_1", revokedAt: NOW + DAY }],
+};
 
 /** Signed by the real key, but the payload is not a license. */
 function signedNonsense(): string {
@@ -245,6 +265,34 @@ const table: readonly VectorEntry[] = [
     token: issue(signingKey, laterTerm),
     options: { now: NOW + 8 * DAY, graceSeconds: 7 * DAY, previous: PREVIOUS },
     expected: { ok: false, reason: "not_yet_valid", claims: laterTerm },
+  },
+  {
+    name: "a license the issuer's revocation list names",
+    publicKey: "signing",
+    token: issue(signingKey, claims()),
+    options: { now: NOW, revocations: currentList },
+    expected: { ok: false, reason: "revoked", claims: claims() },
+  },
+  {
+    name: "a license the revocation list does not name",
+    publicKey: "signing",
+    token: issue(signingKey, claims({ id: "lic_vector_elsewhere" })),
+    options: { now: NOW, revocations: currentList },
+    expected: { ok: true, claims: claims({ id: "lic_vector_elsewhere" }) },
+  },
+  {
+    name: "a revocation list whose own date has passed",
+    publicKey: "signing",
+    token: issue(signingKey, claims()),
+    options: { now: NOW, revocations: staleList },
+    expected: { ok: false, reason: "revocation_stale", claims: claims() },
+  },
+  {
+    name: "a revocation dated tomorrow, which has not taken effect",
+    publicKey: "signing",
+    token: issue(signingKey, claims()),
+    options: { now: NOW, revocations: pendingList },
+    expected: { ok: true, claims: claims() },
   },
   {
     name: "a ring, and a kid naming the key that signed",

@@ -1,6 +1,6 @@
 # Shared test vectors
 
-Twenty-five tokens, the keys that signed them, and the verdict each one must
+Twenty-nine tokens, the keys that signed them, and the verdict each one must
 produce. They are here so that an implementation this repository has never seen
 — a verifier in Go, Rust, Python, anything — can prove it agrees with the
 reference one before its users find out that it does not.
@@ -19,7 +19,10 @@ For each entry in `vectors.json`:
    the rest of the ring.
 2. Verify `token` with `options` applied, treating `options.now` as the current
    time in unix seconds. Anything absent takes the documented default:
-   `skewSeconds` 60, `graceSeconds` 0, no machine fingerprint, no predecessor.
+   `skewSeconds` 60, `graceSeconds` 0, no machine fingerprint, no predecessor,
+   no revocation list. `options.revocations`, where present, is a list already
+   read and already proved to be the issuer's — `issuedAt`, an optional
+   `expiresAt`, and `revoked` entries of `{ id, revokedAt, reason? }`.
 3. Compare against `expected`, in full. `ok: true` carries `claims` and, inside
    a grace window, `status: "expired_in_grace"`. `ok: false` carries `reason`,
    and `claims` as well whenever the token got far enough to parse — a verifier
@@ -58,6 +61,12 @@ ship one in a product.
 of a token: it comes from a high-water mark held on the machine doing the
 checking, so there is nothing to put in a file. Implement it from the README and
 test it locally.
+
+**The `rev1` list itself.** `options.revocations` carries a list as a verifier
+holds it, not the signed blob it arrived in. What two verifiers have to agree on
+is the verdict a list produces; reading one is the same signature check over the
+same canonical JSON as a token, so an implementation that passes the token
+vectors already has it. The blob's own format is in the README.
 
 **Activation requests.** The set carries licenses *issued in answer to* a
 request (`activation` and `machine` both set), because that is what a verifier

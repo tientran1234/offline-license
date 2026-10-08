@@ -27,6 +27,8 @@ export const VERIFY_FAILURES = [
   "machine_mismatch",
   "clock_rollback",
   "renewal_gap",
+  "revoked",
+  "revocation_stale",
 ] as const;
 
 export type VerifyFailure = (typeof VERIFY_FAILURES)[number];
@@ -158,6 +160,54 @@ export interface VerifyOptions {
    * one, verify() checks that the token's `renews` names it — see checkRenewal.
    */
   previous?: Predecessor;
+  /**
+   * The issuer's revocation list, as readRevocationList() returned it.
+   *
+   * Passing one opts into the check and into its staleness: see
+   * checkRevocation. With none, revocation is not checked at all, which is what
+   * every install did before lists existed.
+   */
+  revocations?: RevocationList;
+}
+
+export interface RevocationCheckOptions {
+  /** Unix seconds, already resolved by the caller. */
+  now: number;
+}
+
+export type RevocationCheck = { ok: false; reason: "revoked" | "revocation_stale" } | { ok: true };
+
+/**
+ * What the issuer's list says about this license.
+ *
+ * Two verdicts come out of it. A license named by an entry whose `revokedAt`
+ * has passed is refused: the issuer has withdrawn it, and that is true whatever
+ * the clock or the chain says, which is why this runs before both. And a list
+ * that has itself expired refuses every license, revoked or not — the install
+ * was told to check revocation and can no longer do it, so continuing would
+ * hand a revoked box exactly what it wants for going quiet. A revocation dated
+ * in the future is a notice and not yet a refusal, which is how an issuer
+ * publishes one ahead of the day it bites.
+ *
+ * `skewSeconds` is not among the options, and that is the one place this reads
+ * differently from the clock checks. Slack on an expiry keeps a paying customer
+ * working through a disagreement about what time it is; slack here would only
+ * postpone a refusal the issuer has already decided on, and a revocation that
+ * arrives a minute late is a minute the license should not have worked.
+ */
+export function checkRevocation(
+  claims: LicenseClaims,
+  list: RevocationList | undefined,
+  options: RevocationCheckOptions,
+): RevocationCheck {
+  if (list === undefined) return { ok: true };
+
+  const entry = list.revoked.find((revocation) => revocation.id === claims.id);
+  if (entry !== undefined && options.now >= entry.revokedAt) return { ok: false, reason: "revoked" };
+  if (list.expiresAt !== undefined && options.now >= list.expiresAt) {
+    return { ok: false, reason: "revocation_stale" };
+  }
+  return { ok: true };
 }
 
 export interface TimeCheckOptions {

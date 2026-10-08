@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import {
   bindMachine,
   issue,
+  issueRevocationList,
   LicenseError,
   MemoryLedgerStore,
   MonotonicClock,
@@ -19,6 +20,7 @@ import {
   LicenseGuard,
   LocalStorageLedgerStore,
   LocalStorageStore,
+  readRevocationList,
   UsageLedger,
   USAGE_STORAGE_KEY,
   verify,
@@ -99,6 +101,33 @@ describe("the browser build stands alone", () => {
       reason: "clock_rollback",
       claims: claims(),
     });
+  });
+
+  it("reads a revocation list the issuer signed, and refuses what it names", async () => {
+    const signed = issueRevocationList(keys.privateKey, {
+      issuedAt: NOW,
+      revoked: [{ id: claims().id, revokedAt: NOW - 86_400 }],
+    });
+    const revocations = await readRevocationList(keys.publicKey, signed);
+    const token = issue(keys.privateKey, claims());
+    expect(await verify(keys.publicKey, token, { now: at(NOW), revocations })).toEqual({
+      ok: false,
+      reason: "revoked",
+      claims: claims(),
+    });
+  });
+
+  it("refuses a revocation list that is not the issuer's rather than ignoring it", async () => {
+    // A dashboard that read an edited list as an empty one would be a dashboard
+    // an attacker can un-revoke a license on.
+    const signed = issueRevocationList(keys.privateKey, { issuedAt: NOW, revoked: [] });
+    const [prefix, payload, signature] = signed.split(".") as [string, string, string];
+    const edited = `${prefix}.${payload.slice(0, -1)}${payload.endsWith("A") ? "B" : "A"}.${signature}`;
+    await expect(readRevocationList(keys.publicKey, edited)).rejects.toMatchObject({
+      name: "RevocationError",
+      reason: "invalid_signature",
+    });
+    await expect(readRevocationList(keys.publicKey, "not-a-list")).rejects.toMatchObject({ reason: "malformed" });
   });
 
   it("throws the same LicenseError as the Node build", async () => {

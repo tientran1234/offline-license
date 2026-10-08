@@ -1,6 +1,7 @@
 import { assertClaims, ClaimsError, type LicenseClaims } from "./claims.js";
 import {
   checkRenewal,
+  checkRevocation,
   checkTime,
   LicenseError,
   TOKEN_PREFIX,
@@ -13,10 +14,11 @@ import { bindMachine } from "./machine.js";
 
 /**
  * Check a token. Every check runs in order: signature before anything else, so
- * nothing below ever reasons about claims an attacker wrote. The chain comes
- * before the clock, because a renewal from the wrong generation is the wrong
- * file whatever the time is. Choosing the key by `kid` is not one of the
- * checks — see selectKeys.
+ * nothing below ever reasons about claims an attacker wrote. Revocation comes
+ * next, because a withdrawn license is the wrong license whatever else is true
+ * of it, then the chain before the clock, because a renewal from the wrong
+ * generation is the wrong file whatever the time is. Choosing the key by `kid`
+ * is not one of the checks — see selectKeys.
  */
 export function verify(publicKey: PublicKeyInput, token: string, options: VerifyOptions = {}): VerifyResult {
   const parts = token.split(".");
@@ -42,6 +44,9 @@ export function verify(publicKey: PublicKeyInput, token: string, options: Verify
   }
 
   const now = options.now?.() ?? Math.floor(Date.now() / 1000);
+  const revocation = checkRevocation(claims, options.revocations, { now });
+  if (!revocation.ok) return { ok: false, reason: revocation.reason, claims };
+
   const renewal = checkRenewal(claims, {
     previous: options.previous,
     now,

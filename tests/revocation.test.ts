@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  issue,
   issueRevocationList,
+  LicenseGuard,
   readRevocationList,
   REVOCATION_PREFIX,
   RevocationError,
+  verify,
+  type Predecessor,
   type RevocationEntry,
+  type RevocationList,
 } from "../src/index.js";
-import { keys, NOW, otherKeys } from "./helpers.js";
+import { at, claims, keys, NOW, otherKeys } from "./helpers.js";
 
 const DAY = 86_400;
 
@@ -87,5 +92,102 @@ describe("the revocation list", () => {
     expect(() => readRevocationList(ring, list({ kid: "2019" }))).toThrow(
       expect.objectContaining({ reason: "invalid_signature" }),
     );
+  });
+});
+
+/** The list as a verifier takes it: already read, already proved to be the issuer's. */
+const read = (over = {}): RevocationList => readRevocationList(keys.publicKey, list(over));
+
+const token = (over = {}) => issue(keys.privateKey, claims(over));
+
+const check = (options = {}) => verify(keys.publicKey, token(), { now: at(NOW), ...options });
+
+describe("checking a license against a revocation list", () => {
+  it("refuses a license the list names", () => {
+    // The claims come back, as they do on expiry, so a screen can say which
+    // license was withdrawn rather than only that something was.
+    expect(check({ revocations: read() })).toEqual({ ok: false, reason: "revoked", claims: claims() });
+  });
+
+  it("accepts a license the list does not name", () => {
+    const others = read({ revoked: [entry({ id: "lic_someone_else" })] });
+    expect(check({ revocations: others })).toEqual({ ok: true, claims: claims() });
+  });
+
+  it("checks nothing when no list is supplied", () => {
+    // Every install verified this way before lists existed, and a product that
+    // never adopts them must keep verifying exactly as it did.
+    expect(check()).toEqual({ ok: true, claims: claims() });
+  });
+
+  it("treats a revocation dated in the future as a notice, until the date passes", () => {
+    const pending = read({ revoked: [entry({ revokedAt: NOW + DAY })] });
+    expect(check({ revocations: pending })).toEqual({ ok: true, claims: claims() });
+    // No slack on the date, unlike expiry: it bites the second the issuer said.
+    expect(verify(keys.publicKey, token(), { now: at(NOW + DAY), revocations: pending })).toMatchObject({
+      ok: false,
+      reason: "revoked",
+    });
+  });
+
+  it("bites the moment the issuer dated it, taking no slack from --skew", () => {
+    // A list published to take effect now has to work now. Reading it the way
+    // expiry is read would leave a withdrawn license honoured for another skew.
+    const immediate = read({ revoked: [entry({ revokedAt: NOW })] });
+    expect(check({ revocations: immediate })).toMatchObject({ ok: false, reason: "revoked" });
+    expect(check({ revocations: immediate, skewSeconds: 3600 })).toMatchObject({ ok: false, reason: "revoked" });
+  });
+
+  it("refuses every license once the list itself has expired", () => {
+    // A revoked install can stop collecting lists; a list that is believed
+    // forever is advisory, so an install told to check revocation fails closed
+    // on evidence older than the issuer vouched for.
+    const stale = read({ expiresAt: NOW - DAY, revoked: [entry({ id: "lic_someone_else" })] });
+    expect(check({ revocations: stale })).toEqual({
+      ok: false,
+      reason: "revocation_stale",
+      claims: claims(),
+    });
+  });
+
+  it("keeps believing a list the issuer gave no expiry", () => {
+    const perpetual = read({ revoked: [entry({ id: "lic_someone_else" })] });
+    const longTerm = token({ expiresAt: NOW + 600 * DAY });
+    expect(verify(keys.publicKey, longTerm, { now: at(NOW + 500 * DAY), revocations: perpetual })).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it("says revoked rather than stale when the stale list names the license", () => {
+    const stale = read({ expiresAt: NOW - DAY });
+    expect(check({ revocations: stale })).toMatchObject({ ok: false, reason: "revoked" });
+  });
+
+  it("runs before the clock and the chain, because a withdrawn license is withdrawn either way", () => {
+    const expired = claims({ expiresAt: NOW - 30 * DAY });
+    expect(
+      verify(keys.publicKey, issue(keys.privateKey, expired), { now: at(NOW), revocations: read() }),
+    ).toMatchObject({ ok: false, reason: "revoked" });
+
+    const previous: Predecessor = { id: "lic_test_0", expiresAt: NOW - DAY };
+    const skipping = claims({ renews: "lic_test_skipped" });
+    expect(
+      verify(keys.publicKey, issue(keys.privateKey, skipping), { now: at(NOW), previous, revocations: read() }),
+    ).toMatchObject({ ok: false, reason: "revoked" });
+  });
+
+  it("stops the guard answering questions, and reports the reason to onCheck", () => {
+    const seen: string[] = [];
+    const guard = new LicenseGuard({
+      publicKey: keys.publicKey,
+      token: token(),
+      now: at(NOW),
+      revocations: read(),
+      onCheck: (result) => void seen.push(result.ok ? "ok" : result.reason),
+    });
+    expect(guard.hasFeature("export")).toBe(false);
+    expect(guard.claims()).toBeNull();
+    expect(() => guard.assertFeature("export")).toThrow(expect.objectContaining({ reason: "revoked" }));
+    expect(new Set(seen)).toEqual(new Set(["revoked"]));
   });
 });

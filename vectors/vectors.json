@@ -510,6 +510,143 @@
       }
     },
     {
+      "name": "a license the issuer's revocation list names",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.dVkub4Qhe5XsQlkx0zayBIcHU69nQxXz-Q_SslXlPTIT07l73hTOEqLEt6SG8WXvAjOwfGDhUWlk4ya9Q04WAg",
+      "options": {
+        "now": 1800000000,
+        "revocations": {
+          "issuedAt": 1799913600,
+          "revoked": [
+            {
+              "id": "lic_test_1",
+              "reason": "chargeback",
+              "revokedAt": 1799913600
+            }
+          ]
+        }
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": false,
+        "reason": "revoked"
+      }
+    },
+    {
+      "name": "a license the revocation list does not name",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY192ZWN0b3JfZWxzZXdoZXJlIiwiaXNzdWVkQXQiOjE3OTk5OTY0MDAsImxpY2Vuc2VlIjoiQWNtZSBMdGQiLCJsaW1pdHMiOnsic2VhdHMiOjEwfX0.5iBVK8Dn968KSZN1KnwAUFq_i-faNdW0HvTRw6DSmXPKVZkBfL_LPHO_gik3xxmsRsulteFEgipyfazez7q6CA",
+      "options": {
+        "now": 1800000000,
+        "revocations": {
+          "issuedAt": 1799913600,
+          "revoked": [
+            {
+              "id": "lic_test_1",
+              "reason": "chargeback",
+              "revokedAt": 1799913600
+            }
+          ]
+        }
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_vector_elsewhere",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": true
+      }
+    },
+    {
+      "name": "a revocation list whose own date has passed",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.dVkub4Qhe5XsQlkx0zayBIcHU69nQxXz-Q_SslXlPTIT07l73hTOEqLEt6SG8WXvAjOwfGDhUWlk4ya9Q04WAg",
+      "options": {
+        "now": 1800000000,
+        "revocations": {
+          "expiresAt": 1799913600,
+          "issuedAt": 1792224000,
+          "revoked": [
+            {
+              "id": "lic_vector_other",
+              "revokedAt": 1794816000
+            }
+          ]
+        }
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": false,
+        "reason": "revocation_stale"
+      }
+    },
+    {
+      "name": "a revocation dated tomorrow, which has not taken effect",
+      "publicKey": "signing",
+      "token": "lic1.eyJleHBpcmVzQXQiOjE4MDI1OTIwMDAsImZlYXR1cmVzIjpbImV4cG9ydCIsInNzbyJdLCJpZCI6ImxpY190ZXN0XzEiLCJpc3N1ZWRBdCI6MTc5OTk5NjQwMCwibGljZW5zZWUiOiJBY21lIEx0ZCIsImxpbWl0cyI6eyJzZWF0cyI6MTB9fQ.dVkub4Qhe5XsQlkx0zayBIcHU69nQxXz-Q_SslXlPTIT07l73hTOEqLEt6SG8WXvAjOwfGDhUWlk4ya9Q04WAg",
+      "options": {
+        "now": 1800000000,
+        "revocations": {
+          "issuedAt": 1800000000,
+          "revoked": [
+            {
+              "id": "lic_test_1",
+              "revokedAt": 1800086400
+            }
+          ]
+        }
+      },
+      "expected": {
+        "claims": {
+          "expiresAt": 1802592000,
+          "features": [
+            "export",
+            "sso"
+          ],
+          "id": "lic_test_1",
+          "issuedAt": 1799996400,
+          "licensee": "Acme Ltd",
+          "limits": {
+            "seats": 10
+          }
+        },
+        "ok": true
+      }
+    },
+    {
       "name": "a ring, and a kid naming the key that signed",
       "publicKey": {
         "2025": "other",

@@ -8,10 +8,15 @@ import {
   type LicenseClaims,
 } from "./claims.js";
 import {
+  assertRevocationClaims,
   checkRenewal,
+  checkRevocation,
   checkTime,
   LicenseError,
+  REVOCATION_PREFIX,
+  RevocationError,
   TOKEN_PREFIX,
+  type RevocationClaims,
   type VerifyOptions,
   type VerifyResult,
 } from "./core.js";
@@ -33,6 +38,8 @@ import { ChainedLedger, type ChainedLedgerOptions } from "./ledger.js";
 
 export { LicenseError, TOKEN_PREFIX } from "./core.js";
 export type { Predecessor, VerifyFailure, VerifyOptions, VerifyResult } from "./core.js";
+export { assertRevocationClaims, REVOCATION_PREFIX, RevocationError } from "./core.js";
+export type { RevocationClaims, RevocationEntry, RevocationList } from "./core.js";
 export { assertClaims, ClaimsError, featureValue, hasFeature } from "./claims.js";
 export type { FeatureValue, Features, LicenseClaims } from "./claims.js";
 export { MonotonicClock } from "./clock.js";
@@ -126,8 +133,8 @@ export async function bindMachine(licenseId: string, fingerprint: string): Promi
 /**
  * Check a token. Same checks in the same order as the Node build: signature
  * before anything else, so nothing below ever reasons about claims an attacker
- * wrote, and the renewal chain before the clock. Choosing the key by `kid` is
- * not one of the checks — see selectKeys.
+ * wrote, then revocation, then the renewal chain before the clock. Choosing the
+ * key by `kid` is not one of the checks — see selectKeys.
  */
 export async function verify(
   publicKey: WebPublicKeyInput,
@@ -162,6 +169,9 @@ export async function verify(
   }
 
   const now = options.now?.() ?? Math.floor(Date.now() / 1000);
+  const revocation = checkRevocation(claims, options.revocations, { now });
+  if (!revocation.ok) return { ok: false, reason: revocation.reason, claims };
+
   const renewal = checkRenewal(claims, {
     previous: options.previous,
     now,
@@ -198,6 +208,50 @@ export async function verifyOrThrow(
   const result = await verify(publicKey, token, options);
   if (!result.ok) throw new LicenseError(result.reason, result.claims);
   return result.claims;
+}
+
+/**
+ * Read the issuer's revocation list, refusing one that is not theirs.
+ *
+ * Reading, not signing: a browser is never the issuer, so there is no
+ * issueRevocationList() here any more than there is an issue(). An Electron
+ * renderer handed an already-read list by its main process needs neither.
+ *
+ * Signature before shape, as the Node build does it and for the same reason,
+ * and a list that does not hold together throws rather than yielding an empty
+ * one — an empty list revokes nothing, which is what whoever mangled the file
+ * was after.
+ */
+export async function readRevocationList(
+  publicKey: WebPublicKeyInput,
+  list: string,
+): Promise<RevocationClaims> {
+  const parts = list.trim().split(".");
+  if (parts.length !== 3 || parts[0] !== REVOCATION_PREFIX) {
+    throw new RevocationError(
+      "malformed",
+      `expected a ${REVOCATION_PREFIX}.<payload>.<signature> revocation list`,
+    );
+  }
+  const [prefix, payload, signature] = parts as [string, string, string];
+
+  const signedBytes = encoder.encode(`${prefix}.${payload}`);
+  const signatureBytes = fromBase64Url(signature);
+  const candidates = await selectKeys(publicKey, payload);
+  if (signatureBytes === null || !(await anyKeyVerifies(candidates, signedBytes, signatureBytes))) {
+    throw new RevocationError("invalid_signature", "the revocation list is not signed by a key this verifier holds");
+  }
+
+  const bytes = fromBase64Url(payload);
+  try {
+    if (bytes === null) throw new SyntaxError("payload is not base64url");
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    assertRevocationClaims(parsed);
+    return parsed;
+  } catch (err) {
+    if (err instanceof RevocationError) throw err;
+    throw new RevocationError("invalid_claims", `not a revocation list: ${(err as Error).message}`);
+  }
 }
 
 export interface LicenseGuardOptions extends VerifyOptions {

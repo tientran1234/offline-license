@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createActivationRequest, verify } from "../src/index.js";
+import { createActivationRequest, readRevocationList, verify } from "../src/index.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const CLI = join(root, "dist", "cli.js");
@@ -332,6 +332,67 @@ describe("the activation exchange", () => {
   });
 });
 
+describe("revoke", () => {
+  const revoked = async (...args: string[]) => {
+    const path = join(keys.dir, `list-${args.join("-").replace(/[^\w]/g, "")}.rev`);
+    const result = await cli(["revoke", "--key", keys.private, "--out", path, ...args]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    return path;
+  };
+
+  it("turns a valid license into a rejected one, and leaves the others alone", async () => {
+    const token = await issued("--expires-in", "365d");
+    const list = await revoked("--id", "lic_cli", "--reason", "lic_cli=chargeback");
+
+    const before = await cli(["verify", "--key", keys.public, "--token", token]);
+    expect(before.code).toBe(0);
+
+    const after = await cli(["verify", "--key", keys.public, "--token", token, "--revocations", list]);
+    expect(after.code).toBe(1);
+    expect(after.stderr).toContain("invalid: revoked");
+    expect(after.stderr).toContain("lic_cli");
+
+    const other = await cli([...issueArgs(), "--id", "lic_other", "--expires-in", "365d"]);
+    const spared = await cli([
+      "verify", "--key", keys.public, "--token", other.stdout.trim(), "--revocations", list,
+    ]);
+    expect(spared.code).toBe(0);
+  });
+
+  it("dates the withdrawal when asked, so a list can be published before it bites", async () => {
+    const token = await issued("--expires-at", "2040-01-01T00:00:00Z");
+    const list = await revoked("--id", "lic_cli", "--revoked-at", "2030-01-01T00:00:00Z");
+    const args = ["verify", "--key", keys.public, "--token", token, "--revocations", list];
+
+    const early = await cli([...args, "--now", "2029-12-31T00:00:00Z"]);
+    expect(early.code).toBe(0);
+    const late = await cli([...args, "--now", "2030-01-02T00:00:00Z"]);
+    expect(late.code).toBe(1);
+    expect(late.stderr).toContain("revoked");
+  });
+
+  it("refuses every license once the list it was given has expired", async () => {
+    const token = await issued("--expires-at", "2040-01-01T00:00:00Z");
+    const list = await revoked("--id", "lic_someone_else", "--expires-in", "7d");
+    const stale = await cli([
+      "verify", "--key", keys.public, "--token", token, "--revocations", list,
+      "--now", "2039-01-01T00:00:00Z",
+    ]);
+    expect(stale.code).toBe(1);
+    expect(stale.stderr).toContain("revocation_stale");
+  });
+
+  it("signs a list the library reads back, reasons and all", async () => {
+    const list = await revoked("--id", "lic_cli", "--reason", "lic_cli=refunded", "--now", "1800000000");
+    const parsed = readRevocationList(await readFile(keys.public, "utf8"), await readFile(list, "utf8"));
+    expect(parsed).toEqual({
+      issuedAt: 1_800_000_000,
+      revoked: [{ id: "lic_cli", revokedAt: 1_800_000_000, reason: "refunded" }],
+    });
+  });
+});
+
 describe("usage errors exit 2, never 1", () => {
   // Each case names a fragment of its own message: exiting 2 for some other
   // reason (an unreadable key, say) would otherwise pass for the wrong one.
@@ -351,6 +412,10 @@ describe("usage errors exit 2, never 1", () => {
     ["a previous license this key did not sign", () => ["verify", "--key", keys.public, "--token", "t", "--previous", "not-a-token"], "--previous: not a license"],
     ["an unnamed key among several", () => ["verify", "--key", keys.public, "--key", `new=${keys.public}`, "--token", "t"], "<kid>=<file>"],
     ["a request naming no machine", () => ["request"], "--this-machine or --machine"],
+    ["a revoke naming no license", () => ["revoke", "--key", keys.private], "--id is required"],
+    ["a --reason for a license nothing revokes", () => ["revoke", "--key", keys.private, "--id", "a", "--reason", "b=why"], "which no --id revokes"],
+    ["both expiry flags on a list", () => ["revoke", "--key", keys.private, "--id", "a", "--expires-in", "1d", "--expires-at", "1800000000"], "mutually exclusive"],
+    ["a revocation list that is not one", () => ["verify", "--key", keys.public, "--token", "t", "--revocations", "/nonexistent.rev"], "--revocations: ENOENT"],
     ["a request that is not a request", () => fulfilArgs("not-a-request"), "--request: expected an act1."],
     ["a request edited in transit", () => fulfilArgs(TAMPERED_REQUEST), "--request: the request is not signed"],
     ["a fulfil with no licensee anywhere", () => ["fulfil", "--key", keys.private, "--id", "x", "--request", UNNAMED_REQUEST], "--licensee is required"],
@@ -374,7 +439,9 @@ describe("help", () => {
   it("exits 0 and lists every command", async () => {
     const { code, stdout } = await cli(["help"]);
     expect(code).toBe(0);
-    for (const command of ["keygen", "issue", "verify", "request", "fulfil"]) expect(stdout).toContain(command);
+    for (const command of ["keygen", "issue", "verify", "request", "fulfil", "revoke"]) {
+      expect(stdout).toContain(command);
+    }
   });
 
   it("documents one command at a time", async () => {

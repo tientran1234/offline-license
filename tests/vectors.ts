@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { Predecessor, VerifyOptions, VerifyResult } from "../src/index.js";
+import type { Predecessor, RevocationList, VerifyOptions, VerifyResult } from "../src/index.js";
 
 /**
  * The vectors in `vectors/`, loaded.
@@ -58,6 +58,8 @@ export interface VectorOptions {
   graceSeconds?: number;
   machineFingerprint?: string;
   previous?: Predecessor;
+  /** The issuer's list, already read — what readRevocationList() hands back. */
+  revocations?: RevocationList;
 }
 
 export interface VectorEntry {
@@ -148,5 +150,6 @@ function toVerifyOptions(options: VectorOptions): VerifyOptions {
   if (options.graceSeconds !== undefined) resolved.graceSeconds = options.graceSeconds;
   if (options.machineFingerprint !== undefined) resolved.machineFingerprint = options.machineFingerprint;
   if (options.previous !== undefined) resolved.previous = options.previous;
+  if (options.revocations !== undefined) resolved.revocations = options.revocations;
   return resolved;
 }
